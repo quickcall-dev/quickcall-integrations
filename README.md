@@ -56,10 +56,6 @@ To get the latest version:
 - `/quickcall:updates 7d` - Get updates for last 7 days
 - `/quickcall:updates 30d` - Get updates for last 30 days
 
-Or just ask Claude naturally:
-- "What did I work on today?"
-- "Show me recent commits"
-- "What's changed in the last week?"
 
 ## Development
 
