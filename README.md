@@ -1,6 +1,6 @@
 # QuickCall Integrations
 
-Developer integrations for Claude Code and Cursor.
+Integrate QuickCall into dev workflows - eliminate interruptions for developers. Ask about your work, get instant answers. No more context switching.
 
 **Current integrations:**
 - Git - commits, diffs, code changes
@@ -12,15 +12,23 @@ Developer integrations for Claude Code and Cursor.
 
 ## Install
 
-**Plugin (recommended):**
-```bash
+Run these commands in [Claude Code](https://claude.ai/code):
+
+```
 /plugin marketplace add quickcall-dev/quickcall-integrations
 /plugin install quickcall@quickcall-integrations
 ```
 
-**MCP only:**
+**MCP only (without plugin):**
 ```bash
 claude mcp add quickcall -- uvx quickcall-integrations
+```
+
+## Update
+
+```
+/plugin marketplace update quickcall-integrations
+/plugin update quickcall
 ```
 
 ## Commands
