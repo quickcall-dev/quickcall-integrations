@@ -80,9 +80,23 @@ def create_git_tools(mcp: FastMCP) -> None:
         ),
     ) -> dict:
         """
-        Get updates from a git repository.
+        Get updates from a git repository. Returns commits, diff stats, and uncommitted changes.
 
-        Returns commits, diff stats, file changes, and actual code diff for the given period.
+        FORMAT OUTPUT AS A STANDUP SUMMARY:
+
+        **Summary:** One sentence of what was accomplished.
+
+        **What I worked on:**
+        - Bullet points of key changes (group related commits)
+        - Focus on features/fixes, not individual commits
+        - Use past tense action verbs
+
+        **In Progress:**
+        - Any uncommitted changes (what's being worked on now)
+
+        **Blockers:** Only mention if there are merge conflicts or issues visible.
+
+        Never display raw JSON to the user.
         """
         try:
             repo_info = _get_repo_info(path)

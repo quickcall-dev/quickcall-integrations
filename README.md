@@ -9,7 +9,8 @@
 </p>
 
 <p align="center">
-  <a href="#install">Install</a> |
+  <a href="#claude-code">Claude Code</a> |
+  <a href="#cursor">Cursor</a> |
   <a href="#commands">Commands</a> |
   <a href="#development">Development</a>
 </p>
@@ -26,6 +27,8 @@
 
 ## Install
 
+### Claude Code
+
 Run these commands in [Claude Code](https://claude.ai/code):
 
 ```
@@ -33,14 +36,16 @@ Run these commands in [Claude Code](https://claude.ai/code):
 /plugin install quickcall@quickcall-integrations
 ```
 
-**MCP only (without plugin):**
+<details>
+<summary>MCP only (without plugin)</summary>
+
 ```bash
 claude mcp add quickcall -- uvx quickcall-integrations
 ```
+</details>
 
-## Update
-
-To get the latest version:
+<details>
+<summary>Update to latest version</summary>
 
 ```
 /plugin marketplace update quickcall-integrations
@@ -48,13 +53,40 @@ To get the latest version:
 /plugin install quickcall@quickcall-integrations
 ```
 
-**Note:** After updating, restart Claude Code or open a new terminal for changes to take effect.
+After updating, restart Claude Code or open a new terminal.
+</details>
+
+### Cursor
+
+Add to your Cursor MCP config (`~/.cursor/mcp.json` for global, or `.cursor/mcp.json` for project):
+
+```json
+{
+  "mcpServers": {
+    "quickcall": {
+      "command": "uvx",
+      "args": ["quickcall-integrations"]
+    }
+  }
+}
+```
+
+Then restart Cursor.
 
 ## Commands
+
+### Claude Code
 
 - `/quickcall:updates` - Get git updates (default: 1 day)
 - `/quickcall:updates 7d` - Get updates for last 7 days
 - `/quickcall:updates 30d` - Get updates for last 30 days
+
+### Cursor
+
+Ask the AI naturally - it will use the `get_updates` tool:
+- "What did I work on today?"
+- "Show me recent commits"
+- "What changed in the last week?"
 
 
 ## Development
