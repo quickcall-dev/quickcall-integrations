@@ -14,7 +14,8 @@ Developer integrations for Claude Code and Cursor.
 
 **Plugin (recommended):**
 ```bash
-claude plugin install quickcall@github:quickcall-dev/quickcall-integrations
+/plugin marketplace add quickcall-dev/quickcall-integrations
+/plugin install quickcall@quickcall-integrations
 ```
 
 **MCP only:**
