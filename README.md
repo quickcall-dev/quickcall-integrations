@@ -26,14 +26,21 @@ claude mcp add quickcall -- uvx quickcall-integrations
 
 ## Update
 
+To get the latest version:
+
 ```
 /plugin marketplace update quickcall-integrations
-/plugin update quickcall
+/plugin uninstall quickcall
+/plugin install quickcall@quickcall-integrations
 ```
+
+**Note:** After updating, restart Claude Code or open a new terminal for changes to take effect.
 
 ## Commands
 
-- `/quickcall:daily-updates` - Get git updates for current repo
+- `/quickcall:updates` - Get git updates (default: 1 day)
+- `/quickcall:updates 7d` - Get updates for last 7 days
+- `/quickcall:updates 30d` - Get updates for last 30 days
 
 Or just ask Claude naturally:
 - "What did I work on today?"
