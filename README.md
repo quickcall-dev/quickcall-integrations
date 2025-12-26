@@ -17,12 +17,12 @@
 
 ---
 
-**Current integrations:**
+## Current integrations
+
 - Git - commits, diffs, code changes
 
-**Coming soon:**
-- Calendar
-- Slack
+## Coming soon
+
 - GitHub PRs & Issues
 
 ## Install
@@ -73,6 +73,8 @@ Add to your Cursor MCP config (`~/.cursor/mcp.json` for global, or `.cursor/mcp.
 
 Then restart Cursor.
 
+> Also works with [Antigravity](https://antigravity.dev) and any other IDE that supports MCP servers.
+
 ## Commands
 
 ### Claude Code
@@ -112,3 +114,9 @@ git push origin v0.1.0
 ```
 
 Or trigger manually from GitHub Actions page.
+
+---
+
+<p align="center">
+  Built with ❤️ by <a href="https://quickcall.dev">QuickCall</a>
+</p>
