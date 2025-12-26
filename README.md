@@ -1,6 +1,20 @@
-# QuickCall Integrations
+<p align="center">
+  <img src="assets/logo.png" alt="QuickCall" width="400">
+</p>
 
-Integrate QuickCall into dev workflows - eliminate interruptions for developers. Ask about your work, get instant answers. No more context switching.
+<h3 align="center">Eliminate interruptions for developers</h3>
+
+<p align="center">
+  <em>Ask about your work, get instant answers. No more context switching.</em>
+</p>
+
+<p align="center">
+  <a href="#install">Install</a> |
+  <a href="#commands">Commands</a> |
+  <a href="#development">Development</a>
+</p>
+
+---
 
 **Current integrations:**
 - Git - commits, diffs, code changes
