@@ -18,15 +18,37 @@ Parse `$ARGUMENTS` for time period:
 1. Use the `get_updates` tool from the quickcall MCP server
 2. Pass the current working directory as the `path` parameter
 3. Parse days from argument (e.g., "7d" → 7)
-4. Summarize the changes:
-   - Number of commits
-   - Authors who contributed
-   - Key changes (from commit messages and diff)
-   - Uncommitted changes
 
-## Output Format
+## Output Format (Standup Style)
 
-Concise summary:
-- "3 commits in last 7 days by Alice and Bob"
-- "Main changes: Added auth flow, fixed login bug"
-- "2 uncommitted files"
+Format the response for a standup meeting:
+
+### Summary
+One sentence executive summary of what was accomplished.
+
+### What I worked on
+- Bullet points of key changes (group related commits)
+- Focus on features/fixes, not individual commits
+- Use past tense action verbs
+
+### In Progress
+- Any uncommitted changes (what's being worked on now)
+
+### Blockers
+- Only mention if there are merge conflicts or issues visible in the data
+
+---
+
+Example output:
+
+**Summary:** Built and shipped the QuickCall plugin with MCP server integration.
+
+**What I worked on:**
+- Set up plugin marketplace structure for distribution
+- Implemented git updates command with configurable time range
+- Fixed MCP configuration and install instructions
+
+**In Progress:**
+- Updating command output format
+
+**Blockers:** None
