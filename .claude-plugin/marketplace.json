@@ -1,0 +1,13 @@
+{
+  "name": "quickcall-integrations",
+  "owner": {
+    "name": "QuickCall",
+    "url": "https://quickcall.dev"
+  },
+  "plugins": [
+    {
+      "name": "quickcall",
+      "source": "./plugins/quickcall"
+    }
+  ]
+}
