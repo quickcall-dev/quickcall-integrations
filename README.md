@@ -55,3 +55,18 @@ cd quickcall-integrations
 uv pip install -e .
 quickcall-integrations
 ```
+## Deployment
+
+It only triggers on:
+
+- Tags starting with v* (e.g., v0.1.0)
+- Manual trigger (workflow_dispatch)
+
+To publish to PyPI:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+Or trigger manually from GitHub Actions page.
