@@ -9,6 +9,11 @@
 </p>
 
 <p align="center">
+  <a href="https://quickcall.dev"><img src="https://img.shields.io/badge/Web-quickcall.dev-000000?logo=googlechrome&logoColor=white" alt="Web"></a>
+  <a href="https://discord.gg/DtnMxuE35v"><img src="https://img.shields.io/badge/Discord-Join%20Us-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+</p>
+
+<p align="center">
   <a href="#claude-code">Claude Code</a> |
   <a href="#cursor">Cursor</a> |
   <a href="#commands">Commands</a> |
