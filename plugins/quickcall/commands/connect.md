@@ -4,32 +4,19 @@ description: Connect QuickCall, GitHub, and Slack integrations
 
 # Connect Integrations
 
-Guide the user through connecting their integrations.
+1. Call `check_quickcall_status` first
+2. Connect based on status:
+   - **QuickCall:** `connect_quickcall` → display URL + code → `complete_quickcall_auth`
+   - **GitHub:** `connect_github` → display install URL
+   - **Slack:** `connect_slack` → display install URL
 
-## Instructions
+**CRITICAL:** Always display the full URL as clickable markdown link:
+```
+**Code:** XXXX-XXXX
+**URL:** [Open](https://app.quickcall.dev/cli/setup?code=XXXX-XXXX)
+```
 
-1. First, call `check_quickcall_status` to see current connection status
-
-2. Based on status, guide user through connecting:
-
-   **If not connected to QuickCall:**
-   - Call `connect_quickcall` to start device flow auth
-   - Wait for user to complete browser sign-in
-   - Call `complete_quickcall_auth` with the device code
-
-   **If QuickCall connected but GitHub not connected:**
-   - Ask if user wants to connect GitHub
-   - If yes, call `connect_github` to open GitHub App installation
-
-   **If QuickCall connected but Slack not connected:**
-   - Ask if user wants to connect Slack
-   - If yes, call `connect_slack` to open Slack OAuth
-
-3. After each connection, show updated status
-
-## Output Format
-
-Show a clear summary:
+After connections, show status:
 ```
 QuickCall: Connected
 GitHub: Connected (username)
