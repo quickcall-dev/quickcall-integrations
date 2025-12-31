@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/logo.png" alt="QuickCall" width="400">
+  <img src="https://quickcall.dev/assets/v1/qc-full-512px-white.png" alt="QuickCall" width="400">
 </p>
 
 <h3 align="center">Eliminate interruptions for developers</h3>
