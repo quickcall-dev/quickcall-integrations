@@ -17,7 +17,8 @@
   <a href="#integrations">Integrations</a> |
   <a href="#install">Install</a> |
   <a href="#authentication">Authentication</a> |
-  <a href="#commands">Commands</a>
+  <a href="#commands">Commands</a> |
+  <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
 ---
@@ -109,6 +110,30 @@ Ask the AI naturally:
 - "Show me my open PRs"
 - "List my GitHub repos"
 - "Send a message to #general on Slack"
+
+## Troubleshooting
+
+### Plugin Not Updating?
+
+If new commands don't appear after updating, clear the cache:
+
+```bash
+rm -rf ~/.claude/plugins/cache/quickcall-integrations
+rm -rf ~/.claude/plugins/marketplaces/quickcall-integrations
+```
+
+Then restart Claude Code and reinstall:
+
+```
+/plugin marketplace add quickcall-dev/quickcall-integrations
+/plugin install quickcall@quickcall-integrations
+```
+
+### Commands Not Showing?
+
+Type `/quickcall:` - you should see `connect`, `status`, `updates`.
+
+If only `updates` shows, run the cleanup above and reinstall.
 
 ---
 
