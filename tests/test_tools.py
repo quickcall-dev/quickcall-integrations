@@ -64,10 +64,9 @@ async def test_with_fastmcp():
         console.print(f"Testing on repo: {TEST_REPO_PATH}\n")
 
         try:
-            result = await client.call_tool("get_updates", {
-                "path": TEST_REPO_PATH,
-                "days": 7
-            })
+            result = await client.call_tool(
+                "get_updates", {"path": TEST_REPO_PATH, "days": 7}
+            )
 
             if isinstance(result, list) and len(result) > 0:
                 data = json.loads(result[0].text)
@@ -76,32 +75,40 @@ async def test_with_fastmcp():
                 console.print(f"   Period: {data['period']}")
                 console.print(f"   Commits: {data['commit_count']}")
 
-                if data.get('diff'):
-                    diff = data['diff']
+                if data.get("diff"):
+                    diff = data["diff"]
                     console.print(f"   Files changed: {diff['files_changed']}")
                     console.print(f"   Additions: +{diff['additions']}")
                     console.print(f"   Deletions: -{diff['deletions']}")
 
-                    if diff.get('patch'):
-                        lines = diff['patch'].split('\n')[:10]
+                    if diff.get("patch"):
+                        lines = diff["patch"].split("\n")[:10]
                         console.print("\n   Diff preview:")
                         for line in lines:
-                            if line.startswith('+') and not line.startswith('+++'):
+                            if line.startswith("+") and not line.startswith("+++"):
                                 console.print(f"   [green]{line[:80]}[/green]")
-                            elif line.startswith('-') and not line.startswith('---'):
+                            elif line.startswith("-") and not line.startswith("---"):
                                 console.print(f"   [red]{line[:80]}[/red]")
                             else:
                                 console.print(f"   {line[:80]}")
 
-                if data.get('uncommitted'):
-                    uncommitted = data['uncommitted']
-                    console.print(f"\n   Uncommitted - Staged: {len(uncommitted.get('staged', []))}")
-                    console.print(f"   Uncommitted - Unstaged: {len(uncommitted.get('unstaged', []))}")
+                if data.get("uncommitted"):
+                    uncommitted = data["uncommitted"]
+                    console.print(
+                        f"\n   Uncommitted - Staged: {len(uncommitted.get('staged', []))}"
+                    )
+                    console.print(
+                        f"   Uncommitted - Unstaged: {len(uncommitted.get('unstaged', []))}"
+                    )
 
-                if data.get('commits'):
+                if data.get("commits"):
                     console.print("\n   Recent commits:")
-                    for commit in data['commits'][:3]:
-                        msg = commit['message'][:50] + "..." if len(commit['message']) > 50 else commit['message']
+                    for commit in data["commits"][:3]:
+                        msg = (
+                            commit["message"][:50] + "..."
+                            if len(commit["message"]) > 50
+                            else commit["message"]
+                        )
                         console.print(f"   - {commit['sha']} {msg}")
 
         except Exception as e:

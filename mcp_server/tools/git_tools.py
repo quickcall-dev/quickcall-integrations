@@ -100,11 +100,15 @@ def create_git_tools(mcp: FastMCP) -> None:
         """
         try:
             repo_info = _get_repo_info(path)
-            repo_name = f"{repo_info['owner']}/{repo_info['repo']}" if repo_info['owner'] else repo_info['root']
+            repo_name = (
+                f"{repo_info['owner']}/{repo_info['repo']}"
+                if repo_info["owner"]
+                else repo_info["root"]
+            )
 
             result = {
                 "repository": repo_name,
-                "branch": repo_info['branch'],
+                "branch": repo_info["branch"],
                 "period": f"Last {days} days",
             }
 
@@ -123,18 +127,25 @@ def create_git_tools(mcp: FastMCP) -> None:
                     continue
                 parts = line.split("|", 3)
                 if len(parts) >= 4:
-                    commits.append({
-                        "sha": parts[0][:7],
-                        "author": parts[1],
-                        "date": parts[2],
-                        "message": parts[3],
-                    })
+                    commits.append(
+                        {
+                            "sha": parts[0][:7],
+                            "author": parts[1],
+                            "date": parts[2],
+                            "message": parts[3],
+                        }
+                    )
 
             result["commits"] = commits
             result["commit_count"] = len(commits)
 
             if not commits:
-                result["diff"] = {"files_changed": 0, "additions": 0, "deletions": 0, "patch": ""}
+                result["diff"] = {
+                    "files_changed": 0,
+                    "additions": 0,
+                    "deletions": 0,
+                    "patch": "",
+                }
                 return result
 
             # Get total diff between oldest and newest commit
@@ -143,7 +154,9 @@ def create_git_tools(mcp: FastMCP) -> None:
 
             try:
                 # Get stats
-                numstat = _run_git(["diff", "--numstat", f"{oldest_sha}^", newest_sha], path)
+                numstat = _run_git(
+                    ["diff", "--numstat", f"{oldest_sha}^", newest_sha], path
+                )
 
                 files = []
                 total_add = 0
@@ -156,11 +169,13 @@ def create_git_tools(mcp: FastMCP) -> None:
                     if len(parts) >= 3:
                         adds = int(parts[0]) if parts[0] != "-" else 0
                         dels = int(parts[1]) if parts[1] != "-" else 0
-                        files.append({
-                            "file": parts[2],
-                            "additions": adds,
-                            "deletions": dels,
-                        })
+                        files.append(
+                            {
+                                "file": parts[2],
+                                "additions": adds,
+                                "deletions": dels,
+                            }
+                        )
                         total_add += adds
                         total_del += dels
 
@@ -169,7 +184,9 @@ def create_git_tools(mcp: FastMCP) -> None:
 
                 # Truncate if too large
                 if len(diff_patch) > 50000:
-                    diff_patch = diff_patch[:50000] + "\n\n... (truncated, diff too large)"
+                    diff_patch = (
+                        diff_patch[:50000] + "\n\n... (truncated, diff too large)"
+                    )
 
                 result["diff"] = {
                     "files_changed": len(files),
@@ -179,7 +196,12 @@ def create_git_tools(mcp: FastMCP) -> None:
                     "patch": diff_patch,
                 }
             except ToolError:
-                result["diff"] = {"files_changed": 0, "additions": 0, "deletions": 0, "patch": ""}
+                result["diff"] = {
+                    "files_changed": 0,
+                    "additions": 0,
+                    "deletions": 0,
+                    "patch": "",
+                }
 
             # Uncommitted changes
             staged = _run_git(["diff", "--cached", "--name-only"], path)
@@ -192,7 +214,9 @@ def create_git_tools(mcp: FastMCP) -> None:
                 # Get uncommitted diff patch too
                 uncommitted_patch = _run_git(["diff", "HEAD"], path)
                 if len(uncommitted_patch) > 20000:
-                    uncommitted_patch = uncommitted_patch[:20000] + "\n\n... (truncated)"
+                    uncommitted_patch = (
+                        uncommitted_patch[:20000] + "\n\n... (truncated)"
+                    )
 
                 result["uncommitted"] = {
                     "staged": staged_list,
