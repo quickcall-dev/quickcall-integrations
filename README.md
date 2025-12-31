@@ -14,27 +14,23 @@
 </p>
 
 <p align="center">
-  <a href="#claude-code">Claude Code</a> |
-  <a href="#cursor">Cursor</a> |
-  <a href="#commands">Commands</a> |
-  <a href="#development">Development</a>
+  <a href="#integrations">Integrations</a> |
+  <a href="#install">Install</a> |
+  <a href="#authentication">Authentication</a> |
+  <a href="#commands">Commands</a>
 </p>
 
 ---
 
-## Current integrations
+## Integrations
 
-- Git - commits, diffs, code changes
-
-## Coming soon
-
-- GitHub PRs & Issues
+- **Git** - commits, diffs, code changes (always available)
+- **GitHub** - repos, PRs, commits, branches (requires QuickCall account)
+- **Slack** - send messages, list channels/users (requires QuickCall account)
 
 ## Install
 
 ### Claude Code
-
-Run these commands in [Claude Code](https://claude.ai/code):
 
 ```
 /plugin marketplace add quickcall-dev/quickcall-integrations
@@ -80,45 +76,39 @@ Then restart Cursor.
 
 > Also works with [Antigravity](https://antigravity.dev) and any other IDE that supports MCP servers.
 
+## Authentication
+
+To use GitHub and Slack integrations, connect your QuickCall account:
+
+```
+/quickcall:connect
+```
+
+This will guide you through:
+1. Sign in with Google
+2. Install GitHub App to your org/account
+3. Connect Slack workspace
+
+Credentials are stored locally in `~/.quickcall/credentials.json`.
+
 ## Commands
 
 ### Claude Code
 
-- `/quickcall:updates` - Get git updates (default: 1 day)
-- `/quickcall:updates 7d` - Get updates for last 7 days
-- `/quickcall:updates 30d` - Get updates for last 30 days
+| Command | Description |
+|---------|-------------|
+| `/quickcall:connect` | Connect QuickCall, GitHub, and Slack |
+| `/quickcall:status` | Show connection status |
+| `/quickcall:updates` | Get git updates (default: 1 day) |
+| `/quickcall:updates 7d` | Get updates for last 7 days |
 
-### Cursor
+### Cursor / Other IDEs
 
-Ask the AI naturally - it will use the `get_updates` tool:
+Ask the AI naturally:
 - "What did I work on today?"
-- "Show me recent commits"
-- "What changed in the last week?"
-
-
-## Development
-
-```bash
-git clone https://github.com/quickcall-dev/quickcall-integrations
-cd quickcall-integrations
-uv pip install -e .
-quickcall-integrations
-```
-## Deployment
-
-It only triggers on:
-
-- Tags starting with v* (e.g., v0.1.0)
-- Manual trigger (workflow_dispatch)
-
-To publish to PyPI:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-Or trigger manually from GitHub Actions page.
+- "Show me my open PRs"
+- "List my GitHub repos"
+- "Send a message to #general on Slack"
 
 ---
 
