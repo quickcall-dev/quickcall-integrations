@@ -27,8 +27,9 @@
 
 - **Get standup updates** from git history (commits, diffs, stats)
 - **List PRs, commits, branches** from GitHub repos
-- **Send messages to Slack** channels
-- **Check connection status** for all integrations
+- **Read & send Slack messages** with auto thread fetching
+- **Fuzzy channel matching** - say "no sleep dev" and it finds "no-sleep-dev-channel"
+- **Summarize Slack channels** - get key discussions from last N days
 
 ## Integrations
 
@@ -39,7 +40,7 @@
 | **Slack** | Read/send messages, threads, channels | Yes |
 
 <details>
-<summary><strong>Available Tools (22)</strong></summary>
+<summary><strong>Available Tools (23)</strong></summary>
 
 ### Git
 | Tool | Description |
@@ -62,10 +63,11 @@
 |------|-------------|
 | `list_slack_channels` | List channels bot has access to |
 | `send_slack_message` | Send message to a channel |
-| `read_slack_messages` | Read messages from a channel (with date filter) |
+| `read_slack_messages` | Read messages with threads auto-fetched |
 | `read_slack_thread` | Read replies in a thread |
 | `list_slack_users` | List workspace users |
 | `check_slack_connection` | Verify Slack connection |
+| `reconnect_slack` | Re-authorize to get new permissions |
 
 ### Auth
 | Tool | Description |
@@ -158,6 +160,8 @@ Credentials are stored locally in `~/.quickcall/credentials.json`.
 | `/quickcall:status` | Show connection status |
 | `/quickcall:updates` | Get git updates (default: 1 day) |
 | `/quickcall:updates 7d` | Get updates for last 7 days |
+| `/quickcall:slack-summary` | Summarize Slack messages (default: 1 day) |
+| `/quickcall:slack-summary 7d` | Summarize last 7 days |
 
 ### Cursor / Other IDEs
 
@@ -184,8 +188,9 @@ List branches on [repo-name]
 ### Slack
 ```
 Send "Build completed" to #deployments
-What messages were posted in #general today?
-Show me the thread replies for that message
+What messages were posted in dev channel today?
+Read messages from no sleep dev (fuzzy matches "no-sleep-dev-channel")
+Summarize what was discussed in #engineering this week
 List channels I have access to
 ```
 
