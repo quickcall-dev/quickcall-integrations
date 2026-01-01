@@ -159,11 +159,38 @@ Credentials are stored locally in `~/.quickcall/credentials.json`.
 
 ### Cursor / Other IDEs
 
-Ask the AI naturally:
-- "What did I work on today?"
-- "Show me my open PRs"
-- "List my GitHub repos"
-- "Send a message to #general on Slack"
+Ask the AI naturally - see examples below.
+
+## Example Prompts
+
+### Git
+```
+What did I work on today?
+Give me a standup summary for the last 3 days
+What changes are uncommitted?
+```
+
+### GitHub
+```
+List my repos
+Show open PRs on [repo-name]
+What commits were made this week?
+Get details of PR #123
+List branches on [repo-name]
+```
+
+### Slack
+```
+Send "Build completed" to #deployments
+List channels I have access to
+Who's in the workspace?
+```
+
+### Combined
+```
+List open PRs on [repo] and send titles to #updates channel
+What did I work on this week? Send summary to #standup
+```
 
 ## Troubleshooting
 
