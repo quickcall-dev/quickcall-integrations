@@ -36,10 +36,10 @@
 |-------------|----------|---------------|
 | **Git** | Commits, diffs, standup summaries | No |
 | **GitHub** | Repos, PRs, commits, branches | Yes |
-| **Slack** | Send messages, list channels/users | Yes |
+| **Slack** | Read/send messages, threads, channels | Yes |
 
 <details>
-<summary><strong>Available Tools (20)</strong></summary>
+<summary><strong>Available Tools (22)</strong></summary>
 
 ### Git
 | Tool | Description |
@@ -62,6 +62,8 @@
 |------|-------------|
 | `list_slack_channels` | List channels bot has access to |
 | `send_slack_message` | Send message to a channel |
+| `read_slack_messages` | Read messages from a channel (with date filter) |
+| `read_slack_thread` | Read replies in a thread |
 | `list_slack_users` | List workspace users |
 | `check_slack_connection` | Verify Slack connection |
 
@@ -182,8 +184,9 @@ List branches on [repo-name]
 ### Slack
 ```
 Send "Build completed" to #deployments
+What messages were posted in #general today?
+Show me the thread replies for that message
 List channels I have access to
-Who's in the workspace?
 ```
 
 ### Combined

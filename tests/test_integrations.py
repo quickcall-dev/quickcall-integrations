@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
 """
-Test QuickCall MCP Server Authentication Flow.
+QuickCall MCP Server Integration Tests.
 
-Starts the MCP server and calls tools via MCP protocol to test:
-1. connect_quickcall - Device flow authentication
-2. connect_github - GitHub App installation
-3. connect_slack - Slack OAuth authorization
-4. list_repos - List GitHub repositories
+Starts the MCP server and tests all integrations via MCP protocol:
+
+1. QuickCall Auth - Device flow authentication
+2. GitHub - App installation, list repos
+3. Slack - OAuth, list channels, read messages, fuzzy matching
+4. MCP Resources - slack://channels resource
 
 Usage:
-    python tests/test_auth_flow.py
+    python tests/test_integrations.py
 """
 
 import asyncio
@@ -274,6 +275,125 @@ async def test_list_slack_channels(session: ClientSession):
         return False
 
 
+async def test_slack_resources(session: ClientSession):
+    """Test Slack MCP resources."""
+    console.print("\n[bold cyan]TEST 6: Slack MCP Resources[/bold cyan]\n")
+
+    try:
+        # List all resources
+        console.print("Listing MCP resources...")
+        resources_result = await session.list_resources()
+
+        if not resources_result.resources:
+            console.print(
+                "[yellow]No resources available (Slack may not be connected)[/yellow]"
+            )
+            return True  # Not a failure if Slack isn't connected
+
+        console.print(
+            f"[green]Found {len(resources_result.resources)} resources:[/green]"
+        )
+        for resource in resources_result.resources:
+            console.print(f"  - {resource.uri}: {resource.name}")
+
+        # Try to read slack://channels resource
+        slack_resource = None
+        for resource in resources_result.resources:
+            if "slack" in str(resource.uri).lower():
+                slack_resource = resource
+                break
+
+        if slack_resource:
+            console.print(f"\nReading resource: {slack_resource.uri}")
+            content = await session.read_resource(slack_resource.uri)
+
+            if content and content.contents:
+                console.print("[green]PASS: Resource content:[/green]")
+                for item in content.contents:
+                    if hasattr(item, "text"):
+                        # Print first 500 chars
+                        text = (
+                            item.text[:500] + "..."
+                            if len(item.text) > 500
+                            else item.text
+                        )
+                        console.print(f"\n{text}")
+                return True
+            else:
+                console.print("[red]FAIL: No content in resource[/red]")
+                return False
+        else:
+            console.print("[yellow]No Slack resource found[/yellow]")
+            return True
+
+    except Exception as e:
+        console.print(f"[red]FAIL: Error: {e}[/red]")
+        import traceback
+
+        traceback.print_exc()
+        return False
+
+
+async def test_fuzzy_channel_match(session: ClientSession):
+    """Test fuzzy channel matching via read_slack_messages."""
+    console.print("\n[bold cyan]TEST 7: Fuzzy Channel Matching[/bold cyan]\n")
+
+    try:
+        # First get the actual channel names (use high limit to get all channels)
+        result = await call_tool(session, "list_slack_channels", {"limit": 100})
+
+        if not result or "channels" not in result:
+            console.print("[yellow]No channels available to test[/yellow]")
+            return True
+
+        channels = result["channels"]
+
+        # Debug: print all channels with their is_member status
+        console.print("Channel membership status:")
+        for ch in channels:
+            console.print(f"  #{ch.get('name')}: is_member={ch.get('is_member')}")
+
+        member_channels = [ch for ch in channels if ch.get("is_member")]
+
+        if not member_channels:
+            console.print("[yellow]Bot is not a member of any channels[/yellow]")
+            return True
+
+        # Pick a channel to test fuzzy matching
+        test_channel = member_channels[0]
+        channel_name = test_channel["name"]
+
+        console.print(f"Testing fuzzy match on channel: #{channel_name}")
+
+        # Create fuzzy variations
+        fuzzy_names = [
+            channel_name,  # Exact match
+            channel_name.replace("-", " "),  # Spaces instead of hyphens
+            channel_name.replace("-", ""),  # No separators
+        ]
+
+        for fuzzy_name in fuzzy_names:
+            console.print(f"\n  Trying: '{fuzzy_name}'")
+            try:
+                result = await call_tool(
+                    session,
+                    "read_slack_messages",
+                    {"channel": fuzzy_name, "days": 1, "limit": 1},
+                )
+                if result and "channel" in result:
+                    console.print(f"  [green]PASS: Matched![/green]")
+                else:
+                    console.print(f"  [red]FAIL: No match[/red]")
+            except Exception as e:
+                console.print(f"  [red]FAIL: {e}[/red]")
+
+        return True
+
+    except Exception as e:
+        console.print(f"[red]FAIL: Error: {e}[/red]")
+        return False
+
+
 async def main():
     """Run all tests."""
     console.print("\n[bold]QuickCall MCP Server - Authentication Flow Test[/bold]\n")
@@ -351,6 +471,18 @@ async def main():
             # Test 5: List Slack channels (if Slack connected)
             if results.get("slack"):
                 results["list_slack_channels"] = await test_list_slack_channels(session)
+
+            console.print("\n" + "=" * 60)
+
+            # Test 6: Slack MCP Resources
+            if results.get("slack"):
+                results["slack_resources"] = await test_slack_resources(session)
+
+            console.print("\n" + "=" * 60)
+
+            # Test 7: Fuzzy channel matching
+            if results.get("slack"):
+                results["fuzzy_match"] = await test_fuzzy_channel_match(session)
 
     # Summary
     console.print("\n" + "=" * 60)

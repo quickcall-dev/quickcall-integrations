@@ -10,6 +10,7 @@ from typing import List, Optional, Dict, Any
 
 import httpx
 from pydantic import BaseModel
+from rapidfuzz import fuzz, process
 
 logger = logging.getLogger(__name__)
 
@@ -51,6 +52,18 @@ class SlackMessage(BaseModel):
     message: Optional[Dict[str, Any]] = None
 
 
+class SlackChannelMessage(BaseModel):
+    """Represents a message from channel history."""
+
+    ts: str  # Message timestamp (used as ID)
+    user: Optional[str] = None
+    user_name: Optional[str] = None
+    text: str
+    thread_ts: Optional[str] = None
+    reply_count: int = 0
+    has_thread: bool = False
+
+
 # ============================================================================
 # Slack Client
 # ============================================================================
@@ -62,6 +75,16 @@ class SlackClient:
 
     Provides simplified interface for Slack operations.
     Uses bot token authentication.
+
+    Note on Caching:
+        This client caches channel list and user mappings to reduce API calls.
+        Cache is per-instance and does NOT expire automatically.
+        New channels/users won't appear until:
+        - MCP server restarts (new session)
+        - New SlackClient instance is created
+
+        TODO: Add TTL-based cache invalidation if this becomes an issue.
+        See internal-docs/issues/007-slack-api-caching.md
     """
 
     BASE_URL = "https://slack.com/api"
@@ -80,6 +103,9 @@ class SlackClient:
             "Authorization": f"Bearer {bot_token}",
             "Content-Type": "application/json",
         }
+        # Caches (per-instance, cleared on new client)
+        self._channel_cache: Optional[List["SlackChannel"]] = None
+        self._user_cache: Optional[Dict[str, str]] = None
 
     async def _request(
         self,
@@ -161,7 +187,7 @@ class SlackClient:
     # ========================================================================
 
     def list_channels(
-        self, include_private: bool = True, limit: int = 200
+        self, include_private: bool = True, limit: int = 200, use_cache: bool = True
     ) -> List[SlackChannel]:
         """
         List Slack channels the bot has access to.
@@ -169,18 +195,30 @@ class SlackClient:
         Args:
             include_private: Whether to include private channels
             limit: Maximum channels to return
+            use_cache: Use cached results if available (default: True)
 
         Returns:
             List of channels
         """
+        # Return cached if available
+        if use_cache and self._channel_cache is not None:
+            return (
+                self._channel_cache[:limit]
+                if limit < len(self._channel_cache)
+                else self._channel_cache
+            )
+
         types = (
             "public_channel,private_channel" if include_private else "public_channel"
         )
 
+        # Always fetch 200 to ensure we get all channels for caching
+        fetch_limit = 200
+
         data = self._request_sync(
             "GET",
             "conversations.list",
-            params={"types": types, "limit": limit, "exclude_archived": True},
+            params={"types": types, "limit": fetch_limit, "exclude_archived": True},
         )
 
         channels = []
@@ -196,11 +234,13 @@ class SlackClient:
                 )
             )
 
-        return channels
+        # Cache the full result
+        self._channel_cache = channels
+        return channels[:limit] if limit < len(channels) else channels
 
     def _resolve_channel(self, channel: Optional[str] = None) -> str:
         """
-        Resolve channel name to channel ID.
+        Resolve channel name to channel ID with fuzzy matching.
 
         Args:
             channel: Channel name (with or without #) or channel ID
@@ -213,8 +253,8 @@ class SlackClient:
         if not channel:
             raise ValueError("No channel specified and no default channel configured")
 
-        # If it's already an ID (starts with C), return as-is
-        if channel.startswith("C"):
+        # If it's already an ID (starts with C or G for private), return as-is
+        if channel.startswith("C") or channel.startswith("G"):
             return channel
 
         # Strip # prefix if present
@@ -222,9 +262,27 @@ class SlackClient:
 
         # Look up channel by name
         channels = self.list_channels()
-        for ch in channels:
-            if ch.name.lower() == channel_name:
-                return ch.id
+        channel_names = {ch.name.lower(): ch for ch in channels}
+
+        # First try exact match
+        if channel_name in channel_names:
+            return channel_names[channel_name].id
+
+        # Use rapidfuzz for fuzzy matching
+        # token_sort_ratio handles word reordering (e.g., "dev no sleep" = "no sleep dev")
+        match = process.extractOne(
+            channel_name,
+            list(channel_names.keys()),
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=70,  # Minimum 70% match
+        )
+
+        if match:
+            matched_name, score, _ = match
+            logger.info(
+                f"Fuzzy matched '{channel}' to '{matched_name}' (score: {score})"
+            )
+            return channel_names[matched_name].id
 
         raise ValueError(f"Channel '{channel}' not found or bot is not a member")
 
@@ -303,6 +361,128 @@ class SlackClient:
             ts=data.get("ts", ""),
             message=data.get("message"),
         )
+
+    # ========================================================================
+    # Message History
+    # ========================================================================
+
+    def get_channel_messages(
+        self,
+        channel: str,
+        oldest: Optional[str] = None,
+        latest: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[SlackChannelMessage]:
+        """
+        Get messages from a channel.
+
+        Args:
+            channel: Channel name or ID
+            oldest: Unix timestamp - only messages after this time
+            latest: Unix timestamp - only messages before this time
+            limit: Maximum messages to return (default 100)
+
+        Returns:
+            List of messages (newest first)
+        """
+        channel_id = self._resolve_channel(channel)
+
+        params = {
+            "channel": channel_id,
+            "limit": limit,
+        }
+
+        if oldest:
+            params["oldest"] = oldest
+        if latest:
+            params["latest"] = latest
+
+        data = self._request_sync("GET", "conversations.history", params=params)
+
+        # Get user info for resolving names
+        user_map = self._get_user_map()
+
+        messages = []
+        for msg in data.get("messages", []):
+            # Skip non-message types (joins, leaves, etc.)
+            if msg.get("subtype") in ["channel_join", "channel_leave", "bot_add"]:
+                continue
+
+            user_id = msg.get("user")
+            messages.append(
+                SlackChannelMessage(
+                    ts=msg.get("ts", ""),
+                    user=user_id,
+                    user_name=user_map.get(user_id, user_id),
+                    text=msg.get("text", ""),
+                    thread_ts=msg.get("thread_ts"),
+                    reply_count=msg.get("reply_count", 0),
+                    has_thread=msg.get("reply_count", 0) > 0,
+                )
+            )
+
+        return messages
+
+    def get_thread_replies(
+        self,
+        channel: str,
+        thread_ts: str,
+        limit: int = 100,
+    ) -> List[SlackChannelMessage]:
+        """
+        Get replies in a thread.
+
+        Args:
+            channel: Channel name or ID
+            thread_ts: Thread parent message timestamp
+            limit: Maximum replies to return
+
+        Returns:
+            List of replies (includes parent message first)
+        """
+        channel_id = self._resolve_channel(channel)
+
+        params = {
+            "channel": channel_id,
+            "ts": thread_ts,
+            "limit": limit,
+        }
+
+        data = self._request_sync("GET", "conversations.replies", params=params)
+
+        user_map = self._get_user_map()
+
+        messages = []
+        for msg in data.get("messages", []):
+            user_id = msg.get("user")
+            messages.append(
+                SlackChannelMessage(
+                    ts=msg.get("ts", ""),
+                    user=user_id,
+                    user_name=user_map.get(user_id, user_id),
+                    text=msg.get("text", ""),
+                    thread_ts=msg.get("thread_ts"),
+                    reply_count=msg.get("reply_count", 0),
+                    has_thread=False,
+                )
+            )
+
+        return messages
+
+    def _get_user_map(self) -> Dict[str, str]:
+        """Get a mapping of user IDs to display names (cached)."""
+        # Return cached if available
+        if self._user_cache is not None:
+            return self._user_cache
+
+        try:
+            users = self.list_users(limit=500, include_bots=True)
+            self._user_cache = {
+                u.id: u.display_name or u.real_name or u.name for u in users
+            }
+            return self._user_cache
+        except Exception:
+            return {}
 
     # ========================================================================
     # User Operations

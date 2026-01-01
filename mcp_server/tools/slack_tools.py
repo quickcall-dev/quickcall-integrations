@@ -6,6 +6,7 @@ Connect using connect_quickcall tool first.
 """
 
 from typing import Optional
+from datetime import datetime, timedelta, timezone
 import logging
 
 from fastmcp import FastMCP
@@ -17,9 +18,14 @@ from mcp_server.api_clients.slack_client import SlackClient, SlackAPIError
 
 logger = logging.getLogger(__name__)
 
+# Module-level client cache (keyed by token hash for security)
+_client_cache: Optional[tuple[str, SlackClient]] = None
+
 
 def _get_client() -> SlackClient:
-    """Get the Slack client, raising error if not configured."""
+    """Get the Slack client, raising error if not configured. Uses cached client."""
+    global _client_cache
+
     store = get_credential_store()
 
     if not store.is_authenticated():
@@ -43,8 +49,15 @@ def _get_client() -> SlackClient:
             "Try reconnecting Slack at quickcall.dev/assistant."
         )
 
-    # Create client with fresh token
-    return SlackClient(bot_token=creds.slack_bot_token)
+    # Return cached client if token matches
+    token_hash = hash(creds.slack_bot_token)
+    if _client_cache and _client_cache[0] == token_hash:
+        return _client_cache[1]
+
+    # Create new client and cache it
+    client = SlackClient(bot_token=creds.slack_bot_token)
+    _client_cache = (token_hash, client)
+    return client
 
 
 def create_slack_tools(mcp: FastMCP) -> None:
@@ -201,3 +214,146 @@ def create_slack_tools(mcp: FastMCP) -> None:
                 "connected": False,
                 "error": str(e),
             }
+
+    @mcp.tool(tags={"slack", "messages", "history"})
+    def read_slack_messages(
+        channel: str = Field(
+            ...,
+            description="Channel name (with or without #) or channel ID",
+        ),
+        days: int = Field(
+            default=1,
+            description="Number of days to look back (default: 1)",
+        ),
+        limit: int = Field(
+            default=50,
+            description="Maximum messages to return (default: 50)",
+        ),
+        include_threads: bool = Field(
+            default=True,
+            description="Automatically fetch thread replies for messages with threads (default: true)",
+        ),
+    ) -> dict:
+        """
+        Read messages from a Slack channel.
+
+        Returns messages from the specified channel within the date range.
+        Bot must be a member of the channel.
+        Requires QuickCall authentication with Slack connected.
+        """
+        try:
+            client = _get_client()
+
+            # Calculate oldest timestamp
+            oldest_dt = datetime.now(timezone.utc) - timedelta(days=days)
+            oldest_ts = str(oldest_dt.timestamp())
+
+            messages = client.get_channel_messages(
+                channel=channel,
+                oldest=oldest_ts,
+                limit=limit,
+            )
+
+            result_messages = []
+            for msg in messages:
+                msg_data = {
+                    "ts": msg.ts,
+                    "user": msg.user_name or msg.user,
+                    "text": msg.text,
+                    "has_thread": msg.has_thread,
+                    "reply_count": msg.reply_count,
+                }
+
+                # Fetch thread replies if message has a thread and include_threads is True
+                if include_threads and msg.has_thread and msg.reply_count > 0:
+                    try:
+                        thread_replies = client.get_thread_replies(
+                            channel=channel,
+                            thread_ts=msg.ts,
+                            limit=50,
+                        )
+                        # Skip first message (it's the parent) and add replies
+                        msg_data["replies"] = [
+                            {
+                                "ts": reply.ts,
+                                "user": reply.user_name or reply.user,
+                                "text": reply.text,
+                            }
+                            for reply in thread_replies
+                            if reply.ts != msg.ts  # Skip parent message
+                        ]
+                    except Exception as e:
+                        logger.warning(f"Failed to fetch thread {msg.ts}: {e}")
+                        msg_data["replies"] = []
+
+                result_messages.append(msg_data)
+
+            return {
+                "count": len(result_messages),
+                "channel": channel,
+                "days": days,
+                "messages": result_messages,
+            }
+        except ToolError:
+            raise
+        except SlackAPIError as e:
+            raise ToolError(str(e))
+        except ValueError as e:
+            raise ToolError(str(e))
+        except Exception as e:
+            raise ToolError(f"Failed to read Slack messages: {str(e)}")
+
+    @mcp.tool(tags={"slack", "messages", "threads"})
+    def read_slack_thread(
+        channel: str = Field(
+            ...,
+            description="Channel name (with or without #) or channel ID",
+        ),
+        thread_ts: str = Field(
+            ...,
+            description="Thread timestamp (ts) of the parent message",
+        ),
+        limit: int = Field(
+            default=50,
+            description="Maximum replies to return (default: 50)",
+        ),
+    ) -> dict:
+        """
+        Read replies in a Slack thread.
+
+        Returns all replies in the specified thread.
+        Use the 'ts' from read_slack_messages to get thread_ts.
+        Bot must be a member of the channel.
+        Requires QuickCall authentication with Slack connected.
+        """
+        try:
+            client = _get_client()
+
+            messages = client.get_thread_replies(
+                channel=channel,
+                thread_ts=thread_ts,
+                limit=limit,
+            )
+
+            return {
+                "count": len(messages),
+                "channel": channel,
+                "thread_ts": thread_ts,
+                "messages": [
+                    {
+                        "ts": msg.ts,
+                        "user": msg.user_name or msg.user,
+                        "text": msg.text,
+                        "is_parent": msg.ts == thread_ts,
+                    }
+                    for msg in messages
+                ],
+            }
+        except ToolError:
+            raise
+        except SlackAPIError as e:
+            raise ToolError(str(e))
+        except ValueError as e:
+            raise ToolError(str(e))
+        except Exception as e:
+            raise ToolError(f"Failed to read Slack thread: {str(e)}")

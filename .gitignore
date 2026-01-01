@@ -1,4 +1,8 @@
 internal-docs/
+
+# Local MCP config (for dev testing - not committed)
+.mcp.json
+
 # Secrets and environment
 secrets/
 *.env

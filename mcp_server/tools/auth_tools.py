@@ -320,7 +320,7 @@ def create_auth_tools(mcp: FastMCP):
             }
 
     @mcp.tool(tags={"auth", "slack", "quickcall"})
-    def connect_slack(open_browser: bool = True) -> Dict[str, Any]:
+    def connect_slack(open_browser: bool = True, force: bool = False) -> Dict[str, Any]:
         """
         Connect Slack to your QuickCall account.
 
@@ -330,6 +330,7 @@ def create_auth_tools(mcp: FastMCP):
 
         Args:
             open_browser: Automatically open the install URL in browser (default: True)
+            force: Force re-authorization even if already connected (use to get new permissions)
 
         Returns:
             Install URL and instructions
@@ -353,18 +354,20 @@ def create_auth_tools(mcp: FastMCP):
 
         try:
             with httpx.Client(timeout=30.0) as client:
+                params = {"force": "true"} if force else {}
                 response = client.get(
                     f"{QUICKCALL_API_URL}/api/cli/slack/install-url",
+                    params=params,
                     headers={"Authorization": f"Bearer {stored.device_token}"},
                 )
                 response.raise_for_status()
                 data = response.json()
 
-            if data.get("already_connected"):
+            if data.get("already_connected") and not force:
                 return {
                     "status": "already_connected",
                     "message": f"Slack is already connected (workspace: {data.get('team_name')})",
-                    "hint": "You can use Slack tools like list_channels, send_message, etc.",
+                    "hint": "Use force=True to re-authorize with updated permissions.",
                 }
 
             install_url = data.get("install_url")
@@ -408,4 +411,85 @@ def create_auth_tools(mcp: FastMCP):
             return {
                 "status": "error",
                 "message": f"Failed to connect Slack: {e}",
+            }
+
+    @mcp.tool(tags={"auth", "slack", "quickcall"})
+    def reconnect_slack(open_browser: bool = True) -> Dict[str, Any]:
+        """
+        Reconnect Slack to get updated permissions.
+
+        Use this when the Slack app has new scopes/permissions that
+        require re-authorization. This forces a fresh OAuth flow
+        even if Slack is already connected.
+
+        Args:
+            open_browser: Automatically open the OAuth URL in browser (default: True)
+
+        Returns:
+            OAuth URL and instructions
+        """
+        store = get_credential_store()
+
+        if not store.is_authenticated():
+            return {
+                "status": "error",
+                "message": "Not connected to QuickCall",
+                "hint": "Run connect_quickcall first to authenticate.",
+            }
+
+        stored = store.get_stored_credentials()
+        if not stored:
+            return {
+                "status": "error",
+                "message": "No stored credentials found",
+                "hint": "Run connect_quickcall to authenticate.",
+            }
+
+        try:
+            with httpx.Client(timeout=30.0) as client:
+                # Force reconnect by passing force=true
+                response = client.get(
+                    f"{QUICKCALL_API_URL}/api/cli/slack/install-url",
+                    params={"force": "true"},
+                    headers={"Authorization": f"Bearer {stored.device_token}"},
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            install_url = data.get("install_url")
+
+            if open_browser and install_url:
+                try:
+                    webbrowser.open(install_url)
+                except Exception as e:
+                    logger.warning(f"Failed to open browser: {e}")
+
+            return {
+                "status": "pending",
+                "message": "Please re-authorize Slack in your browser to get updated permissions.",
+                "install_url": install_url,
+                "instructions": [
+                    f"1. Open this URL: {install_url}",
+                    "2. Select your Slack workspace",
+                    "3. Review the NEW permissions and click 'Allow'",
+                ],
+                "hint": "This will update your Slack permissions with any new scopes.",
+            }
+
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                return {
+                    "status": "error",
+                    "message": "Session expired. Please reconnect.",
+                    "hint": "Run disconnect_quickcall then connect_quickcall again.",
+                }
+            return {
+                "status": "error",
+                "message": f"API error: {e.response.status_code}",
+            }
+        except Exception as e:
+            logger.error(f"Failed to get Slack install URL: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to reconnect Slack: {e}",
             }

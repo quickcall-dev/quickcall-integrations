@@ -23,6 +23,7 @@ from mcp_server.tools.utility_tools import create_utility_tools
 from mcp_server.tools.github_tools import create_github_tools
 from mcp_server.tools.slack_tools import create_slack_tools
 from mcp_server.tools.auth_tools import create_auth_tools
+from mcp_server.resources.slack_resources import create_slack_resources
 
 # Configure logging
 logging.basicConfig(
@@ -53,6 +54,9 @@ def create_server() -> FastMCP:
     # Register GitHub and Slack tools (check credentials at runtime)
     create_github_tools(mcp)
     create_slack_tools(mcp)
+
+    # Register resources (available in Claude's context)
+    create_slack_resources(mcp)
 
     # Log current status
     if is_authenticated:

@@ -127,14 +127,36 @@ class GitHubClient:
     def health_check(self) -> bool:
         """Check if GitHub API is accessible with the token."""
         try:
-            self.gh.get_user().login
-            return True
+            # Use installation/repositories endpoint - works with GitHub App tokens
+            with httpx.Client() as client:
+                response = client.get(
+                    "https://api.github.com/installation/repositories",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    params={"per_page": 1},
+                )
+                return response.status_code == 200
         except Exception:
             return False
 
     def get_authenticated_user(self) -> str:
-        """Get the username of the authenticated user."""
-        return self.gh.get_user().login
+        """
+        Get the GitHub username associated with this installation.
+
+        Note: GitHub App installation tokens can't access /user endpoint.
+        We return the installation owner instead.
+        """
+        # Try to get from first repo's owner
+        try:
+            repos = self.list_repos(limit=1)
+            if repos:
+                return repos[0].owner.login
+        except Exception:
+            pass
+        return "GitHub App"  # Fallback
 
     def close(self):
         """Close GitHub API client."""
