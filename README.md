@@ -23,11 +23,65 @@
 
 ---
 
+## Capabilities
+
+- **Get standup updates** from git history (commits, diffs, stats)
+- **List PRs, commits, branches** from GitHub repos
+- **Send messages to Slack** channels
+- **Check connection status** for all integrations
+
 ## Integrations
 
-- **Git** - commits, diffs, code changes (always available)
-- **GitHub** - repos, PRs, commits, branches (requires QuickCall account)
-- **Slack** - send messages, list channels/users (requires QuickCall account)
+| Integration | Features | Auth Required |
+|-------------|----------|---------------|
+| **Git** | Commits, diffs, standup summaries | No |
+| **GitHub** | Repos, PRs, commits, branches | Yes |
+| **Slack** | Send messages, list channels/users | Yes |
+
+<details>
+<summary><strong>Available Tools (20)</strong></summary>
+
+### Git
+| Tool | Description |
+|------|-------------|
+| `get_updates` | Get git commits, diff stats, and uncommitted changes |
+
+### GitHub
+| Tool | Description |
+|------|-------------|
+| `list_repos` | List accessible repositories |
+| `list_prs` | List pull requests (open/closed/all) |
+| `get_pr` | Get PR details (title, description, files changed) |
+| `list_commits` | List commits with optional filters |
+| `get_commit` | Get commit details (message, stats, files) |
+| `list_branches` | List repository branches |
+| `check_github_connection` | Verify GitHub connection |
+
+### Slack
+| Tool | Description |
+|------|-------------|
+| `list_slack_channels` | List channels bot has access to |
+| `send_slack_message` | Send message to a channel |
+| `list_slack_users` | List workspace users |
+| `check_slack_connection` | Verify Slack connection |
+
+### Auth
+| Tool | Description |
+|------|-------------|
+| `connect_quickcall` | Start device flow authentication |
+| `check_quickcall_status` | Check connection status |
+| `disconnect_quickcall` | Remove local credentials |
+| `connect_github` | Install GitHub App |
+| `connect_slack` | Authorize Slack App |
+
+### Utility
+| Tool | Description |
+|------|-------------|
+| `get_current_datetime` | Get current UTC datetime |
+| `calculate_date_range` | Calculate date range for queries |
+| `calculate_date_offset` | Add/subtract time from a date |
+
+</details>
 
 ## Install
 
