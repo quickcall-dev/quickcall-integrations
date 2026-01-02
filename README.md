@@ -91,10 +91,40 @@
 
 ### Claude Code
 
+**Step 1:** Add marketplace (skip if already added)
 ```
 /plugin marketplace add quickcall-dev/quickcall-integrations
+```
+
+**Step 2:** Install plugin
+```
 /plugin install quickcall@quickcall-integrations
 ```
+
+**Step 3:** Restart Claude Code
+
+<details>
+<summary>Clean install (if having issues)</summary>
+
+Remove everything and reinstall:
+```bash
+rm -rf ~/.claude/plugins/cache/quickcall-integrations
+rm -rf ~/.claude/plugins/marketplaces/quickcall-integrations
+```
+
+Then in Claude Code:
+```
+/plugin marketplace remove quickcall-integrations
+```
+```
+/plugin marketplace add quickcall-dev/quickcall-integrations
+```
+```
+/plugin install quickcall@quickcall-integrations
+```
+
+Restart Claude Code after reinstalling.
+</details>
 
 <details>
 <summary>MCP only (without plugin)</summary>
@@ -102,18 +132,6 @@
 ```bash
 claude mcp add quickcall -- uvx quickcall-integrations
 ```
-</details>
-
-<details>
-<summary>Update to latest version</summary>
-
-```
-/plugin marketplace update quickcall-integrations
-/plugin uninstall quickcall
-/plugin install quickcall@quickcall-integrations
-```
-
-After updating, restart Claude Code or open a new terminal.
 </details>
 
 ### Cursor
