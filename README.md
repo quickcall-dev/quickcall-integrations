@@ -14,14 +14,51 @@
 </p>
 
 <p align="center">
-  <a href="#integrations">Integrations</a> |
   <a href="#install">Install</a> |
+  <a href="#capabilities">Capabilities</a> |
+  <a href="#integrations">Integrations</a> |
   <a href="#authentication">Authentication</a> |
   <a href="#commands">Commands</a> |
   <a href="#troubleshooting">Troubleshooting</a>
 </p>
 
 ---
+
+## Install
+
+### Claude Code
+
+**In your terminal:**
+```bash
+claude mcp add quickcall -- uvx quickcall-integrations
+```
+
+**In Claude Code:**
+```
+/plugin marketplace add quickcall-dev/quickcall-integrations
+```
+```
+/plugin enable quickcall
+```
+
+**Restart Claude Code**, then verify with `/mcp` and `/plugin list`.
+
+### Cursor / Other IDEs
+
+Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
+
+```json
+{
+  "mcpServers": {
+    "quickcall": {
+      "command": "uvx",
+      "args": ["quickcall-integrations"]
+    }
+  }
+}
+```
+
+> Works with any IDE that supports MCP servers.
 
 ## Capabilities
 
@@ -86,42 +123,6 @@
 | `calculate_date_offset` | Add/subtract time from a date |
 
 </details>
-
-## Install
-
-### Claude Code
-
-**In your terminal:**
-```bash
-claude mcp add quickcall -- uvx quickcall-integrations
-```
-
-**In Claude Code:**
-```
-/plugin marketplace add quickcall-dev/quickcall-integrations
-```
-```
-/plugin enable quickcall
-```
-
-**Restart Claude Code**, then verify with `/mcp` and `/plugin list`.
-
-### Cursor / Other IDEs
-
-Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
-
-```json
-{
-  "mcpServers": {
-    "quickcall": {
-      "command": "uvx",
-      "args": ["quickcall-integrations"]
-    }
-  }
-}
-```
-
-> Works with any IDE that supports MCP servers.
 
 ## Authentication
 
