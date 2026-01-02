@@ -91,52 +91,24 @@
 
 ### Claude Code
 
-**Step 1:** Add marketplace (skip if already added)
-```
-/plugin marketplace add quickcall-dev/quickcall-integrations
-```
-
-**Step 2:** Install plugin
-```
-/plugin install quickcall@quickcall-integrations
-```
-
-**Step 3:** Restart Claude Code
-
-<details>
-<summary>Clean install (if having issues)</summary>
-
-Remove everything and reinstall:
-```bash
-rm -rf ~/.claude/plugins/cache/quickcall-integrations
-rm -rf ~/.claude/plugins/marketplaces/quickcall-integrations
-```
-
-Then in Claude Code:
-```
-/plugin marketplace remove quickcall-integrations
-```
-```
-/plugin marketplace add quickcall-dev/quickcall-integrations
-```
-```
-/plugin install quickcall@quickcall-integrations
-```
-
-Restart Claude Code after reinstalling.
-</details>
-
-<details>
-<summary>MCP only (without plugin)</summary>
-
+**In your terminal:**
 ```bash
 claude mcp add quickcall -- uvx quickcall-integrations
 ```
-</details>
 
-### Cursor
+**In Claude Code:**
+```
+/plugin marketplace add quickcall-dev/quickcall-integrations
+```
+```
+/plugin enable quickcall
+```
 
-Add to your Cursor MCP config (`~/.cursor/mcp.json` for global, or `.cursor/mcp.json` for project):
+**Restart Claude Code**, then verify with `/mcp` and `/plugin list`.
+
+### Cursor / Other IDEs
+
+Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 
 ```json
 {
@@ -149,9 +121,7 @@ Add to your Cursor MCP config (`~/.cursor/mcp.json` for global, or `.cursor/mcp.
 }
 ```
 
-Then restart Cursor.
-
-> Also works with [Antigravity](https://antigravity.dev) and any other IDE that supports MCP servers.
+> Works with any IDE that supports MCP servers.
 
 ## Authentication
 
@@ -220,27 +190,22 @@ What did I work on this week? Send summary to #standup
 
 ## Troubleshooting
 
-### Plugin Not Updating?
+### Clean Reinstall
 
-If new commands don't appear after updating, clear the cache:
+If commands don't appear or aren't updating:
 
 ```bash
+# Remove everything
 rm -rf ~/.claude/plugins/cache/quickcall-integrations
 rm -rf ~/.claude/plugins/marketplaces/quickcall-integrations
+claude mcp remove quickcall
 ```
 
-Then restart Claude Code and reinstall:
-
-```
-/plugin marketplace add quickcall-dev/quickcall-integrations
-/plugin install quickcall@quickcall-integrations
-```
+Then follow the [install steps](#claude-code) again.
 
 ### Commands Not Showing?
 
-Type `/quickcall:` - you should see `connect`, `status`, `updates`.
-
-If only `updates` shows, run the cleanup above and reinstall.
+Type `/quickcall:` - you should see `connect`, `status`, `updates`. If not, do a clean reinstall above.
 
 ---
 
