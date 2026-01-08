@@ -12,7 +12,7 @@ from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from mcp_server.auth import get_credential_store, is_authenticated
+from mcp_server.auth import get_credential_store
 from mcp_server.api_clients.github_client import GitHubClient
 
 logger = logging.getLogger(__name__)
@@ -291,6 +291,88 @@ def create_github_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             raise ToolError(f"Failed to list branches: {str(e)}")
+
+    @mcp.tool(tags={"github", "prs", "appraisal"})
+    def search_merged_prs(
+        author: Optional[str] = Field(
+            default=None,
+            description="GitHub username to filter by. Defaults to authenticated user if not specified.",
+        ),
+        days: int = Field(
+            default=180,
+            description="Number of days to look back (default: 180 for ~6 months)",
+        ),
+        org: Optional[str] = Field(
+            default=None,
+            description="GitHub org to search within. If not specified, searches all accessible repos.",
+        ),
+        repo: Optional[str] = Field(
+            default=None,
+            description="Specific repo in 'owner/repo' format (e.g., 'revolving-org/supabase'). Overrides org if specified.",
+        ),
+        limit: int = Field(
+            default=100,
+            description="Maximum PRs to return (default: 100)",
+        ),
+    ) -> dict:
+        """
+        Search for merged pull requests by author within a time period.
+
+        USE FOR APPRAISALS: This tool is ideal for gathering contribution data
+        for performance reviews. Returns basic PR info - use get_pr for full
+        details (additions, deletions, files) on specific PRs.
+
+        Claude should analyze the returned PRs to:
+
+        1. CATEGORIZE by type (look at PR title/labels):
+           - Features: "feat:", "add:", "implement", "new", "create"
+           - Enhancements: "improve:", "update:", "perf:", "optimize", "enhance"
+           - Bug fixes: "fix:", "bugfix:", "hotfix:", "resolve", "patch"
+           - Chores: "chore:", "docs:", "test:", "ci:", "refactor:", "bump"
+
+        2. IDENTIFY top PRs worth highlighting (call get_pr for detailed metrics)
+
+        3. SUMMARIZE for appraisal with accomplishments grouped by category
+
+        Returns: number, title, body, merged_at, labels, repo, owner, html_url, author.
+        For full stats (additions, deletions, files), call get_pr on specific PRs.
+
+        Requires QuickCall authentication with GitHub connected.
+        """
+        try:
+            client = _get_client()
+
+            # Calculate since_date from days
+            from datetime import datetime, timedelta
+
+            since_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+
+            # Use authenticated user if author not specified
+            if not author:
+                creds = get_credential_store().get_api_credentials()
+                if creds and creds.github_username:
+                    author = creds.github_username
+
+            prs = client.search_merged_prs(
+                author=author,
+                since_date=since_date,
+                org=org,
+                repo=repo,
+                limit=limit,
+            )
+
+            return {
+                "count": len(prs),
+                "period": f"Last {days} days",
+                "author": author,
+                "org": org,
+                "repo": repo,
+                "prs": prs,
+            }
+        except ToolError:
+            raise
+        except Exception as e:
+            raise ToolError(f"Failed to search merged PRs: {str(e)}")
 
     @mcp.tool(tags={"github", "status"})
     def check_github_connection() -> dict:

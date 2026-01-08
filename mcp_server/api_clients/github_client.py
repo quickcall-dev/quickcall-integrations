@@ -460,3 +460,100 @@ class GitHubClient:
             )
 
         return branches
+
+    # ========================================================================
+    # Search Operations (for Appraisals)
+    # ========================================================================
+
+    def search_merged_prs(
+        self,
+        author: Optional[str] = None,
+        since_date: Optional[str] = None,
+        org: Optional[str] = None,
+        repo: Optional[str] = None,
+        limit: int = 100,
+    ) -> List[Dict[str, Any]]:
+        """
+        Search for merged pull requests using GitHub Search API.
+
+        Ideal for gathering contribution data for appraisals/reviews.
+
+        Args:
+            author: GitHub username to filter by
+            since_date: ISO date string (YYYY-MM-DD) - only PRs merged after this date
+            org: GitHub org to search within
+            repo: Specific repo in "owner/repo" format (overrides org if specified)
+            limit: Maximum PRs to return (max 100 per page)
+
+        Returns:
+            List of merged PR dicts with: number, title, body, merged_at,
+            labels, repo, owner, html_url
+        """
+        # Build search query
+        query_parts = ["is:pr", "is:merged"]
+
+        if author:
+            query_parts.append(f"author:{author}")
+
+        if since_date:
+            query_parts.append(f"merged:>={since_date}")
+
+        # repo takes precedence over org
+        if repo:
+            query_parts.append(f"repo:{repo}")
+        elif org:
+            query_parts.append(f"org:{org}")
+
+        query = " ".join(query_parts)
+
+        try:
+            with httpx.Client() as client:
+                response = client.get(
+                    "https://api.github.com/search/issues",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    params={
+                        "q": query,
+                        "sort": "updated",
+                        "order": "desc",
+                        "per_page": min(limit, 100),
+                    },
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            # Convert to simplified format
+            prs = []
+            for item in data.get("items", [])[:limit]:
+                # Extract repo info from repository_url
+                # Format: https://api.github.com/repos/owner/repo
+                repo_url_parts = item.get("repository_url", "").split("/")
+                repo_owner = repo_url_parts[-2] if len(repo_url_parts) >= 2 else ""
+                repo_name = repo_url_parts[-1] if len(repo_url_parts) >= 1 else ""
+
+                prs.append(
+                    {
+                        "number": item["number"],
+                        "title": item["title"],
+                        "body": item.get("body") or "",
+                        "merged_at": item.get("pull_request", {}).get("merged_at"),
+                        "html_url": item["html_url"],
+                        "labels": [label["name"] for label in item.get("labels", [])],
+                        "repo": repo_name,
+                        "owner": repo_owner,
+                        "author": item.get("user", {}).get("login", "unknown"),
+                    }
+                )
+
+            return prs
+
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to search PRs: HTTP {e.response.status_code}")
+            raise GithubException(e.response.status_code, e.response.json())
+        except Exception as e:
+            logger.error(f"Failed to search PRs: {e}")
+            raise
