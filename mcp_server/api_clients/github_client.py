@@ -258,10 +258,15 @@ class GitHubClient:
         gh_repo = self._get_repo(owner, repo)
         prs = []
 
-        for pr in gh_repo.get_pulls(state=state, sort="updated", direction="desc")[
-            :limit
-        ]:
-            prs.append(self._convert_pr(pr))
+        try:
+            pulls = gh_repo.get_pulls(state=state, sort="updated", direction="desc")
+            for i, pr in enumerate(pulls):
+                if i >= limit:
+                    break
+                prs.append(self._convert_pr(pr))
+        except IndexError:
+            # Empty repo or no PRs - return empty list
+            pass
 
         return prs
 
