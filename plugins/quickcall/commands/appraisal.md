@@ -4,7 +4,7 @@ description: Generate contribution summary for performance reviews. Usage: /quic
 
 # Appraisal Summary
 
-Generate a comprehensive contribution summary for performance appraisals.
+Generate a comprehensive contribution summary for performance appraisals that helps developers sell their impact to leadership.
 
 ## Arguments
 
@@ -46,7 +46,7 @@ Parse `$ARGUMENTS` for time period:
    - Unique repos contributed to
    - Date range covered
 
-5. **Present the appraisal summary**
+5. **Present the appraisal summary with leadership-ready framing**
 
 ## Output Format
 
@@ -57,16 +57,24 @@ Parse `$ARGUMENTS` for time period:
 
 **1. {Feature Title}** (PR #{number} in {repo})
 - {Brief description based on PR body/title}
-- Impact: {X additions, Y deletions, Z files changed}
+- Technical Impact: {X additions, Y deletions, Z files changed}
+- Business Impact: [How did this feature help users/revenue/growth? Fill in: ___]
 
-**2. {Enhancement Title}** (PR #{number} in {repo})
+> **Make it count:** Frame this as solving a customer pain point or enabling a business goal.
+
+**2. {Enhancement/Fix Title}** (PR #{number} in {repo})
 - {Brief description}
-- Impact: {metrics if fetched}
+- Technical Impact: {metrics if fetched}
+- Business Impact: [Did this reduce support tickets? Improve conversion? Fill in: ___]
+
+> **Make it count:** Quantify the before/after. "Reduced page load by X%" or "Eliminated Y hours of manual work"
 
 **3. {Another significant PR}**
 ...
 
-### Metrics
+---
+
+### Metrics Summary
 
 | Category      | Count |
 |---------------|-------|
@@ -79,19 +87,42 @@ Parse `$ARGUMENTS` for time period:
 **Repositories:** {list of unique repos}
 **Period:** {start_date} to {end_date}
 
+> **Make it count:** "Delivered X features across Y repositories, demonstrating cross-team collaboration and system-wide ownership."
+
+---
+
 ### Technical Areas
 - {Infer from PR titles/repos what technologies or areas were worked on}
 - {E.g., "Backend API development", "CI/CD improvements", etc.}
 
+> **Make it count:** Connect technical skills to business value. "Improved CI/CD pipeline" → "Enabled faster releases, reducing time-to-market by [X days/weeks]"
+
 ---
 
-*Ready for your self-review. Add business impact, user metrics, and stakeholder feedback to make it compelling.*
+### Business Impact (Fill in the blanks)
+
+Use these prompts to strengthen your self-review:
+
+1. **Revenue Impact:** [Did any feature directly impact revenue? e.g., "Payment integration enabled $X in new transactions"]
+
+2. **User Impact:** [How many users benefited? e.g., "Auth improvements affected 10K+ daily active users"]
+
+3. **Efficiency Gains:** [Time saved for team/customers? e.g., "Automated deployment saves 2 hours per release"]
+
+4. **Risk Reduction:** [Bugs fixed that could have caused outages? e.g., "Fixed race condition that caused 3 incidents last quarter"]
+
+5. **Strategic Alignment:** [How does this work support company OKRs/goals?]
+
+---
+
+*This is your technical proof. Now add the business story. Leadership cares about outcomes, not outputs.*
 ```
 
-## Tips
+## Tips for Demonstrating Impact
 
-- Focus on FEATURES and ENHANCEMENTS - these show impact
-- Group related PRs if they're part of the same project/feature
-- Look for patterns showing growth (new tech, increased scope, cross-team work)
-- Be encouraging - help them see the value of their work!
-- If there are many PRs, summarize by theme rather than listing all
+- **Lead with outcomes, not outputs:** "Shipped 47 PRs" → "Delivered 3 major features that increased user engagement by X%"
+- **Quantify everything:** Numbers are memorable. Even estimates help: "~20% faster", "saved ~4 hours/week"
+- **Connect to company goals:** Tie your work to OKRs, quarterly goals, or strategic initiatives
+- **Show growth:** Highlight new technologies learned, increased scope, or cross-team collaboration
+- **Bug fixes matter:** Frame them as "risk reduction" or "reliability improvements"
+- **Group related work:** "Authentication overhaul" sounds bigger than "5 auth-related PRs"
