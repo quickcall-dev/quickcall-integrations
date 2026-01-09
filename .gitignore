@@ -9,6 +9,8 @@ secrets/
 *.env
 *.env.*
 *.pem
+.quickcall.env
+quickcall.env
 mcp-inspector-config.json
 
 # Byte-compiled / optimized / DLL files

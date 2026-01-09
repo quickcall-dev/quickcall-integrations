@@ -126,6 +126,8 @@ Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 
 ## Authentication
 
+### Option 1: QuickCall (Recommended)
+
 To use GitHub and Slack integrations, connect your QuickCall account:
 
 ```
@@ -138,6 +140,30 @@ This will guide you through:
 3. Connect Slack workspace
 
 Credentials are stored locally in `~/.quickcall/credentials.json`.
+
+### Option 2: GitHub PAT (For Enterprise Users)
+
+If your organization can't install the QuickCall GitHub App (common at enterprises with strict app policies), you can use a Personal Access Token instead:
+
+**Environment Variable:**
+```bash
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+```
+
+**Or config file** (create `.quickcall.env` in your project root or home directory):
+```bash
+# .quickcall.env
+GITHUB_TOKEN=ghp_xxxxxxxxxxxxxxxxxxxx
+GITHUB_USERNAME=your-username  # Optional: for better UX
+```
+
+**Create a PAT at:** https://github.com/settings/tokens
+
+**Required scopes:**
+- `repo` - Full access to private repositories
+- `public_repo` - Access to public repositories only (if you don't need private repos)
+
+**Note:** PAT mode provides access to GitHub tools only. For Slack integration, use QuickCall authentication.
 
 ## Commands
 

@@ -78,6 +78,10 @@ class GitHubClient:
 
     Provides simplified interface for GitHub operations.
     Focuses on PRs and commits.
+
+    Supports both:
+    - GitHub App installation tokens (via QuickCall)
+    - Personal Access Tokens (PAT fallback)
     """
 
     def __init__(
@@ -91,15 +95,18 @@ class GitHubClient:
         Initialize GitHub API client.
 
         Args:
-            token: GitHub installation access token
+            token: GitHub access token (installation token or PAT)
             default_owner: Default repository owner (optional)
             default_repo: Default repository name (optional)
-            installation_id: GitHub App installation ID (for listing repos)
+            installation_id: GitHub App installation ID (None for PAT mode)
         """
         self.token = token
         self.default_owner = default_owner
         self.default_repo = default_repo
         self.installation_id = installation_id
+
+        # Detect if this is a PAT (no installation_id means PAT mode)
+        self._is_pat_mode = installation_id is None
 
         # Initialize PyGithub client
         auth = Auth.Token(token)
@@ -107,6 +114,11 @@ class GitHubClient:
 
         # Cache for repo objects
         self._repo_cache: Dict[str, Any] = {}
+
+    @property
+    def is_pat_mode(self) -> bool:
+        """Check if client is using PAT authentication."""
+        return self._is_pat_mode
 
     def _get_repo(self, owner: Optional[str] = None, repo: Optional[str] = None):
         """Get PyGithub repo object, using defaults if not specified."""
@@ -127,36 +139,50 @@ class GitHubClient:
     def health_check(self) -> bool:
         """Check if GitHub API is accessible with the token."""
         try:
-            # Use installation/repositories endpoint - works with GitHub App tokens
-            with httpx.Client() as client:
-                response = client.get(
-                    "https://api.github.com/installation/repositories",
-                    headers={
-                        "Authorization": f"Bearer {self.token}",
-                        "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28",
-                    },
-                    params={"per_page": 1},
-                )
-                return response.status_code == 200
+            if self._is_pat_mode:
+                # For PAT, use /user endpoint
+                user = self.gh.get_user()
+                _ = user.login  # This will trigger the API call
+                return True
+            else:
+                # For installation tokens, use /installation/repositories endpoint
+                with httpx.Client() as client:
+                    response = client.get(
+                        "https://api.github.com/installation/repositories",
+                        headers={
+                            "Authorization": f"Bearer {self.token}",
+                            "Accept": "application/vnd.github+json",
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                        params={"per_page": 1},
+                    )
+                    return response.status_code == 200
         except Exception:
             return False
 
     def get_authenticated_user(self) -> str:
         """
-        Get the GitHub username associated with this installation.
+        Get the GitHub username for the authenticated user/installation.
 
-        Note: GitHub App installation tokens can't access /user endpoint.
-        We return the installation owner instead.
+        For PAT: Returns the user's login
+        For GitHub App: Returns the installation owner
         """
-        # Try to get from first repo's owner
-        try:
-            repos = self.list_repos(limit=1)
-            if repos:
-                return repos[0].owner.login
-        except Exception:
-            pass
-        return "GitHub App"  # Fallback
+        if self._is_pat_mode:
+            try:
+                user = self.gh.get_user()
+                return user.login
+            except Exception:
+                return self.default_owner or "unknown"
+        else:
+            # GitHub App installation tokens can't access /user endpoint
+            # Try to get from first repo's owner
+            try:
+                repos = self.list_repos(limit=1)
+                if repos:
+                    return repos[0].owner
+            except Exception:
+                pass
+            return self.default_owner or "GitHub App"
 
     def close(self):
         """Close GitHub API client."""
@@ -168,7 +194,10 @@ class GitHubClient:
 
     def list_repos(self, limit: int = 20) -> List[Repository]:
         """
-        List repositories accessible to the GitHub App installation.
+        List repositories accessible to the authenticated user/installation.
+
+        For PAT mode: Lists user's repositories
+        For GitHub App: Lists installation repositories
 
         Args:
             limit: Maximum repositories to return
@@ -177,43 +206,70 @@ class GitHubClient:
             List of repositories
         """
         repos = []
-        try:
-            # Installation tokens can't use PyGithub's user.get_repos() endpoint
-            # Must use /installation/repositories endpoint directly (same as backend)
-            # https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-app-installation
-            with httpx.Client() as client:
-                response = client.get(
-                    "https://api.github.com/installation/repositories",
-                    headers={
-                        "Authorization": f"Bearer {self.token}",
-                        "Accept": "application/vnd.github+json",
-                        "X-GitHub-Api-Version": "2022-11-28",
-                    },
-                    params={"per_page": limit},
-                )
-                response.raise_for_status()
-                data = response.json()
 
-                for repo_data in data.get("repositories", [])[:limit]:
+        if self._is_pat_mode:
+            # PAT mode: Use PyGithub's user.get_repos()
+            try:
+                user = self.gh.get_user()
+                for i, gh_repo in enumerate(user.get_repos(sort="updated")):
+                    if i >= limit:
+                        break
                     repos.append(
                         Repository(
-                            name=repo_data["name"],
-                            owner=repo_data["owner"]["login"],
-                            full_name=repo_data["full_name"],
-                            html_url=repo_data["html_url"],
-                            description=repo_data.get("description") or "",
-                            default_branch=repo_data.get("default_branch", "main"),
-                            private=repo_data.get("private", False),
+                            name=gh_repo.name,
+                            owner=gh_repo.owner.login,
+                            full_name=gh_repo.full_name,
+                            html_url=gh_repo.html_url,
+                            description=gh_repo.description or "",
+                            default_branch=gh_repo.default_branch,
+                            private=gh_repo.private,
                         )
                     )
-        except httpx.HTTPStatusError as e:
-            logger.error(
-                f"Failed to list installation repos: HTTP {e.response.status_code}"
-            )
-            raise GithubException(e.response.status_code, e.response.json())
-        except Exception as e:
-            logger.error(f"Failed to list installation repos: {e}")
-            raise
+            except GithubException as e:
+                logger.error(f"Failed to list user repos: {e}")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to list user repos: {e}")
+                raise
+        else:
+            # GitHub App mode: Use /installation/repositories endpoint
+            try:
+                # Installation tokens can't use PyGithub's user.get_repos() endpoint
+                # Must use /installation/repositories endpoint directly (same as backend)
+                # https://docs.github.com/en/rest/apps/installations#list-repositories-accessible-to-the-app-installation
+                with httpx.Client() as client:
+                    response = client.get(
+                        "https://api.github.com/installation/repositories",
+                        headers={
+                            "Authorization": f"Bearer {self.token}",
+                            "Accept": "application/vnd.github+json",
+                            "X-GitHub-Api-Version": "2022-11-28",
+                        },
+                        params={"per_page": limit},
+                    )
+                    response.raise_for_status()
+                    data = response.json()
+
+                    for repo_data in data.get("repositories", [])[:limit]:
+                        repos.append(
+                            Repository(
+                                name=repo_data["name"],
+                                owner=repo_data["owner"]["login"],
+                                full_name=repo_data["full_name"],
+                                html_url=repo_data["html_url"],
+                                description=repo_data.get("description") or "",
+                                default_branch=repo_data.get("default_branch", "main"),
+                                private=repo_data.get("private", False),
+                            )
+                        )
+            except httpx.HTTPStatusError as e:
+                logger.error(
+                    f"Failed to list installation repos: HTTP {e.response.status_code}"
+                )
+                raise GithubException(e.response.status_code, e.response.json())
+            except Exception as e:
+                logger.error(f"Failed to list installation repos: {e}")
+                raise
 
         return repos
 

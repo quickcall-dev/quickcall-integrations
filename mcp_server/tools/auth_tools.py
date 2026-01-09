@@ -3,6 +3,8 @@ Authentication tools for QuickCall MCP.
 
 Provides tools for users to connect, check status, and disconnect
 their QuickCall account from the CLI.
+
+Also provides GitHub PAT authentication for users who can't install the GitHub App.
 """
 
 import os
@@ -11,11 +13,12 @@ import webbrowser
 from typing import Dict, Any
 
 import httpx
+from github import Github, Auth, GithubException
 from fastmcp import FastMCP
+from pydantic import Field
 
 from mcp_server.auth import (
     get_credential_store,
-    is_authenticated,
     DeviceFlowAuth,
 )
 
@@ -100,45 +103,74 @@ def create_auth_tools(mcp: FastMCP):
         Check your QuickCall connection status.
 
         Shows:
-        - Whether you're connected
+        - Whether you're connected to QuickCall
         - Your account info
-        - GitHub connection status
+        - GitHub connection status (via App or PAT)
         - Slack connection status
 
         Returns:
             Current authentication and integration status
         """
         store = get_credential_store()
-
-        if not store.is_authenticated():
-            return {
-                "connected": False,
-                "message": "Not connected to QuickCall",
-                "hint": "Use connect_quickcall to authenticate.",
-            }
-
         status = store.get_status()
 
-        return {
-            "connected": True,
-            "user": {
+        # Build result with both QuickCall and PAT status
+        result = {
+            "quickcall_connected": status.get("quickcall_authenticated", False),
+            "credentials_file": status.get("credentials_file"),
+        }
+
+        # QuickCall user info
+        if status.get("quickcall_authenticated"):
+            result["user"] = {
                 "id": status.get("user_id"),
                 "email": status.get("email"),
                 "username": status.get("username"),
-            },
-            "authenticated_at": status.get("authenticated_at"),
-            "integrations": {
-                "github": {
-                    "connected": status.get("github", {}).get("connected", False),
-                    "username": status.get("github", {}).get("username"),
-                },
-                "slack": {
-                    "connected": status.get("slack", {}).get("connected", False),
-                    "team_name": status.get("slack", {}).get("team_name"),
-                },
-            },
-            "credentials_file": status.get("credentials_file"),
+            }
+            result["authenticated_at"] = status.get("authenticated_at")
+
+        # GitHub status (can be via App or PAT)
+        github_status = status.get("github", {})
+        result["github"] = {
+            "connected": github_status.get("connected", False),
+            "mode": github_status.get("mode"),  # "github_app" or "pat"
+            "username": github_status.get("username"),
         }
+
+        # PAT-specific info if configured
+        github_pat = status.get("github_pat", {})
+        if github_pat.get("configured"):
+            result["github_pat"] = {
+                "configured": True,
+                "username": github_pat.get("username"),
+                "configured_at": github_pat.get("configured_at"),
+            }
+
+        # Slack status (requires QuickCall)
+        slack_status = status.get("slack", {})
+        result["slack"] = {
+            "connected": slack_status.get("connected", False),
+            "team_name": slack_status.get("team_name"),
+        }
+
+        # Add helpful message based on status
+        if not status.get("quickcall_authenticated") and not github_pat.get(
+            "configured"
+        ):
+            result["message"] = "Not connected to QuickCall or GitHub"
+            result["hint"] = (
+                "Use connect_quickcall for full access, or connect_github_via_pat for GitHub only."
+            )
+        elif not status.get("quickcall_authenticated") and github_pat.get("configured"):
+            result["message"] = "GitHub connected via PAT (QuickCall not connected)"
+            result["hint"] = "Use connect_quickcall to also access Slack tools."
+        elif status.get("quickcall_authenticated"):
+            result["message"] = "Connected to QuickCall"
+
+        # Legacy compatibility
+        result["connected"] = status.get("quickcall_authenticated", False)
+
+        return result
 
     @mcp.tool(tags={"auth", "quickcall"})
     def disconnect_quickcall() -> Dict[str, Any]:
@@ -492,4 +524,139 @@ def create_auth_tools(mcp: FastMCP):
             return {
                 "status": "error",
                 "message": f"Failed to reconnect Slack: {e}",
+            }
+
+    # ========================================================================
+    # GitHub PAT Authentication (alternative to QuickCall GitHub App)
+    # ========================================================================
+
+    @mcp.tool(tags={"auth", "github"})
+    def connect_github_via_pat(
+        token: str = Field(
+            ...,
+            description="GitHub Personal Access Token (ghp_xxx or github_pat_xxx)",
+        ),
+    ) -> Dict[str, Any]:
+        """
+        Connect GitHub using a Personal Access Token (PAT).
+
+        Use this if your organization can't install the QuickCall GitHub App.
+        This is an alternative to the standard connect_github flow.
+
+        This command:
+        1. Validates your PAT by calling GitHub API
+        2. Auto-detects your GitHub username
+        3. Stores the PAT securely in ~/.quickcall/credentials.json
+
+        After connecting, you can use GitHub tools like list_repos, list_prs, etc.
+
+        Create a PAT at: https://github.com/settings/tokens
+        Required scopes:
+        - repo (full access to private repos)
+        - OR public_repo (public repos only)
+
+        Note: PAT mode works independently of QuickCall. You don't need
+        to run connect_quickcall first. However, Slack tools still require
+        QuickCall authentication.
+        """
+        store = get_credential_store()
+
+        # Check if already configured via stored PAT
+        if store.has_github_pat():
+            pat_creds = store.get_github_pat_credentials()
+            return {
+                "status": "already_connected",
+                "message": f"GitHub PAT is already configured (username: {pat_creds.username})",
+                "configured_at": pat_creds.configured_at,
+                "hint": "Use disconnect_github_pat to remove it, then connect again with a new token.",
+            }
+
+        # Validate token format
+        if not token.startswith(("ghp_", "github_pat_")):
+            return {
+                "status": "error",
+                "message": "Invalid token format. GitHub PATs start with 'ghp_' or 'github_pat_'",
+                "hint": "Create a new token at https://github.com/settings/tokens",
+            }
+
+        # Validate token by calling GitHub API
+        try:
+            auth = Auth.Token(token)
+            gh = Github(auth=auth)
+            user = gh.get_user()
+            username = user.login
+            gh.close()
+        except GithubException as e:
+            if e.status == 401:
+                return {
+                    "status": "error",
+                    "message": "Invalid or expired token.",
+                    "hint": "Check your token at https://github.com/settings/tokens",
+                }
+            return {
+                "status": "error",
+                "message": f"GitHub API error: {e.data.get('message', str(e))}",
+            }
+        except Exception as e:
+            logger.error(f"Failed to validate GitHub PAT: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to validate token: {e}",
+            }
+
+        # Store the PAT
+        try:
+            store.save_github_pat(token=token, username=username)
+        except Exception as e:
+            logger.error(f"Failed to save GitHub PAT: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to save token: {e}",
+            }
+
+        return {
+            "status": "success",
+            "message": f"Successfully connected GitHub as {username}!",
+            "username": username,
+            "mode": "pat",
+            "hint": "You can now use GitHub tools. Run check_github_connection to verify.",
+        }
+
+    @mcp.tool(tags={"auth", "github"})
+    def disconnect_github_pat() -> Dict[str, Any]:
+        """
+        Disconnect GitHub PAT authentication.
+
+        This removes only the stored PAT. If you also have QuickCall
+        connected, that connection remains intact.
+
+        After disconnecting:
+        - If you have QuickCall GitHub App connected, it will be used instead
+        - Otherwise, GitHub tools will be unavailable until you reconnect
+        """
+        store = get_credential_store()
+
+        if not store.has_github_pat():
+            return {
+                "status": "not_connected",
+                "message": "No GitHub PAT is configured.",
+                "hint": "Use connect_github_via_pat to set up PAT authentication.",
+            }
+
+        try:
+            pat_creds = store.get_github_pat_credentials()
+            username = pat_creds.username if pat_creds else "unknown"
+
+            store.clear_github_pat()
+
+            return {
+                "status": "disconnected",
+                "message": f"Disconnected GitHub PAT ({username})",
+                "hint": "Use connect_github_via_pat to reconnect, or connect_github to use the QuickCall GitHub App instead.",
+            }
+        except Exception as e:
+            logger.error(f"Failed to disconnect GitHub PAT: {e}")
+            return {
+                "status": "error",
+                "message": f"Failed to disconnect: {e}",
             }
