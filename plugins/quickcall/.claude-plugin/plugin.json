@@ -1,7 +1,7 @@
 {
   "name": "quickcall",
   "description": "Integrate quickcall into dev workflows - eliminate interruptions for developers. Ask about your work, get instant answers. No more context switching.",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "author": {
     "name": "Sagar Sarkale"
   }

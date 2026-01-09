@@ -1,54 +1,110 @@
 """
 GitHub Tools - Pull requests and commits via GitHub API.
 
-These tools require authentication via QuickCall.
-Connect using connect_quickcall tool first.
+Authentication (in priority order):
+1. QuickCall GitHub App (preferred) - connect via connect_quickcall
+2. Personal Access Token (PAT) - set GITHUB_TOKEN env var or use .quickcall.env file
+
+PAT fallback is useful for:
+- Users at organizations that can't install the GitHub App
+- Personal repositories without app installation
+- Testing and development
 """
 
-from typing import Optional
+from typing import Optional, Tuple
 import logging
 
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
-from mcp_server.auth import get_credential_store
+from mcp_server.auth import (
+    get_credential_store,
+    get_github_pat,
+    get_github_pat_username,
+)
 from mcp_server.api_clients.github_client import GitHubClient
 
 logger = logging.getLogger(__name__)
 
 
+# Track whether we're using PAT mode for status reporting
+_using_pat_mode: bool = False
+_pat_source: Optional[str] = None
+
+
 def _get_client() -> GitHubClient:
-    """Get the GitHub client, raising error if not configured."""
+    """
+    Get the GitHub client using the best available authentication method.
+
+    Authentication priority:
+    1. QuickCall GitHub App (if connected and working)
+    2. Personal Access Token from environment/config file
+
+    Raises:
+        ToolError: If no authentication method is available
+    """
+    global _using_pat_mode, _pat_source
+
     store = get_credential_store()
 
-    if not store.is_authenticated():
-        raise ToolError(
-            "Not connected to QuickCall. "
-            "Run connect_quickcall to authenticate and enable GitHub tools."
+    # Try QuickCall GitHub App first (preferred)
+    if store.is_authenticated():
+        creds = store.get_api_credentials()
+        if creds and creds.github_connected and creds.github_token:
+            _using_pat_mode = False
+            _pat_source = None
+            return GitHubClient(
+                token=creds.github_token,
+                default_owner=creds.github_username,
+                installation_id=creds.github_installation_id,
+            )
+
+    # Try PAT fallback
+    pat_token, pat_source = get_github_pat()
+    if pat_token:
+        _using_pat_mode = True
+        _pat_source = pat_source
+        pat_username = get_github_pat_username()
+        logger.info(f"Using GitHub PAT from {pat_source}")
+        return GitHubClient(
+            token=pat_token,
+            default_owner=pat_username,
+            installation_id=None,  # No installation ID for PAT
         )
 
-    # Fetch fresh credentials from API
-    creds = store.get_api_credentials()
+    # No authentication available - provide helpful error message
+    _using_pat_mode = False
+    _pat_source = None
 
-    if not creds or not creds.github_connected:
+    if store.is_authenticated():
+        # Connected to QuickCall but GitHub not connected
         raise ToolError(
-            "GitHub not connected. "
-            "Connect GitHub at quickcall.dev/assistant to enable GitHub tools."
+            "GitHub not connected. Options:\n"
+            "1. Connect GitHub App at quickcall.dev/assistant (recommended)\n"
+            "2. Run connect_github_via_pat with your Personal Access Token\n"
+            "3. Set GITHUB_TOKEN environment variable"
+        )
+    else:
+        # Not connected to QuickCall at all
+        raise ToolError(
+            "GitHub authentication required. Options:\n"
+            "1. Run connect_quickcall to use QuickCall (full access to GitHub + Slack)\n"
+            "2. Run connect_github_via_pat with a Personal Access Token (GitHub only)\n"
+            "3. Set GITHUB_TOKEN environment variable\n\n"
+            "For PAT: Create token at https://github.com/settings/tokens\n"
+            "Required scopes: repo (private) or public_repo (public only)"
         )
 
-    if not creds.github_token:
-        raise ToolError(
-            "Could not fetch GitHub token. "
-            "Try reconnecting GitHub at quickcall.dev/assistant."
-        )
 
-    # Create client with fresh token and installation ID
-    return GitHubClient(
-        token=creds.github_token,
-        default_owner=creds.github_username,
-        installation_id=creds.github_installation_id,
-    )
+def is_using_pat_mode() -> Tuple[bool, Optional[str]]:
+    """
+    Check if GitHub tools are using PAT mode.
+
+    Returns:
+        Tuple of (is_using_pat, source) where source is where the PAT was loaded from.
+    """
+    return (_using_pat_mode, _pat_source)
 
 
 def create_github_tools(mcp: FastMCP) -> None:
@@ -380,38 +436,67 @@ def create_github_tools(mcp: FastMCP) -> None:
         Check if GitHub is connected and working.
 
         Tests the GitHub connection by fetching your account info.
+        Shows whether using QuickCall GitHub App or PAT fallback.
         Use this to verify your GitHub integration is working.
         """
         store = get_credential_store()
 
-        if not store.is_authenticated():
-            return {
-                "connected": False,
-                "error": "Not connected to QuickCall. Run connect_quickcall first.",
-            }
-
-        creds = store.get_api_credentials()
-
-        if not creds:
-            return {
-                "connected": False,
-                "error": "Could not fetch credentials from QuickCall.",
-            }
-
-        if not creds.github_connected:
-            return {
-                "connected": False,
-                "error": "GitHub not connected. Connect at quickcall.dev/assistant.",
-            }
-
+        # First, try to get a working client (this handles both QuickCall and PAT)
         try:
             client = _get_client()
-            username = client.get_authenticated_user()
+            using_pat, pat_source = is_using_pat_mode()
+
+            # Try to get username to verify connection works
+            try:
+                username = client.get_authenticated_user()
+            except Exception:
+                username = None
+
+            if using_pat:
+                return {
+                    "connected": True,
+                    "mode": "pat",
+                    "pat_source": pat_source,
+                    "username": username or get_github_pat_username(),
+                    "note": "Using Personal Access Token (PAT) mode. "
+                    "Some features like list_repos may have limited access.",
+                }
+            else:
+                creds = store.get_api_credentials()
+                return {
+                    "connected": True,
+                    "mode": "github_app",
+                    "username": username or (creds.github_username if creds else None),
+                    "installation_id": creds.github_installation_id if creds else None,
+                }
+        except ToolError as e:
+            # No authentication available
+            pat_token, _ = get_github_pat()
+            if pat_token:
+                # PAT exists but failed to work
+                return {
+                    "connected": False,
+                    "error": "PAT authentication failed. Token may be invalid or expired.",
+                    "suggestion": "Check your GITHUB_TOKEN or .quickcall.env file.",
+                }
+
+            # Check QuickCall status for helpful error
+            if store.is_authenticated():
+                creds = store.get_api_credentials()
+                if creds and not creds.github_connected:
+                    return {
+                        "connected": False,
+                        "error": "GitHub not connected via QuickCall.",
+                        "suggestions": [
+                            "Connect GitHub App at quickcall.dev/assistant",
+                            "Or set GITHUB_TOKEN environment variable",
+                            "Or create .quickcall.env with GITHUB_TOKEN=ghp_xxx",
+                        ],
+                    }
 
             return {
-                "connected": True,
-                "username": username,
-                "installation_id": creds.github_installation_id,
+                "connected": False,
+                "error": str(e),
             }
         except Exception as e:
             return {
