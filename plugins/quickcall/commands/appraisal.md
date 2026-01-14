@@ -16,30 +16,39 @@ Parse `$ARGUMENTS` for time period:
 
 ## Instructions
 
+**IMPORTANT:** Only use these two MCP tools for appraisals:
+1. `prepare_appraisal_data` - fetches and dumps all PR data to a temp file
+2. `get_appraisal_pr_details` - reads specific PRs from that file (no API calls)
+
+Do NOT use `get_prs`, `list_prs`, or any other tools - they will overflow context.
+
+---
+
 1. **Gather contribution data:**
 
-   **Option A - GitHub API (preferred if connected):**
-   - Use `search_merged_prs` tool with parsed days
-   - If user specifies an org, pass the `org` parameter
-   - If user specifies a repo, pass the `repo` parameter (format: "owner/repo")
-   - Default author is the authenticated user
+   **Option A - GitHub API (preferred):**
+   - Call `prepare_appraisal_data(days=X)` with the parsed time period
+   - This fetches ALL merged PRs with full stats in PARALLEL
+   - Dumps everything to a temp file (avoids context overflow)
+   - Returns: `file_path` + list of `pr_titles` (number, title, repo only)
+   - Optional: pass `org` or `repo` parameter to filter
 
-   **Option B - Local Git (fallback if not connected or for specific repo):**
+   **Option B - Local Git (fallback):**
    - Use `get_local_contributions` tool on the current directory
    - This parses local git history for commits by the user
-   - Extracts PR numbers from merge commit messages where available
 
-2. **Analyze and categorize each PR:**
-   Examine each PR's title, body, and labels to categorize:
+2. **Analyze and categorize PRs from the titles:**
+   Review the `pr_titles` list returned in step 1 and categorize:
    - **Features**: New functionality (feat:, add:, implement, new, create)
    - **Enhancements**: Improvements (improve:, update:, perf:, optimize, enhance)
    - **Bug fixes**: (fix:, bugfix:, hotfix:, resolve, patch)
    - **Chores**: Maintenance work (docs:, test:, ci:, chore:, refactor:, bump)
 
-3. **Identify top accomplishments:**
-   - Filter out chores for the highlights
-   - Sort features and enhancements by significance (based on title complexity, labels)
-   - For top 3-5 PRs, call `get_pr` to fetch detailed metrics (additions, deletions, files)
+3. **Get details for top accomplishments:**
+   - Pick the top 5-10 significant PRs from the categorized list
+   - Call `get_appraisal_pr_details(file_path, [pr_numbers])`
+   - This reads from the temp file - NO additional API calls
+   - Returns full details: additions, deletions, files, body
 
 4. **Calculate summary metrics:**
    - Total PRs merged by category
