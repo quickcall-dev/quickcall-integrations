@@ -1,6 +1,6 @@
 [project]
 name = "quickcall-integrations"
-version = "0.2.0"
+version = "0.3.0"
 description = "MCP server with developer integrations for Claude Code and Cursor"
 readme = "README.md"
 requires-python = ">=3.10"
@@ -28,4 +28,5 @@ dev = [
     "mcp>=1.9.0",
     "rich>=13.0.0",
     "ruff>=0.14.11",
+    "twine>=6.2.0",
 ]
