@@ -566,15 +566,12 @@ def create_github_tools(mcp: FastMCP) -> None:
             with open(file_path, "w") as f:
                 json.dump(dump_data, f, indent=2, default=str)
 
-            # Step 6: Return summary for Claude to review
-            pr_summaries = [
+            # Step 6: Return file path + just titles for Claude to scan
+            pr_titles = [
                 {
                     "number": pr["number"],
                     "title": pr["title"],
                     "repo": f"{pr['owner']}/{pr['repo']}",
-                    "additions": pr.get("additions", 0),
-                    "deletions": pr.get("deletions", 0),
-                    "merged_at": pr.get("merged_at"),
                 }
                 for pr in full_prs
             ]
@@ -584,9 +581,9 @@ def create_github_tools(mcp: FastMCP) -> None:
                 "count": len(full_prs),
                 "author": author,
                 "period": f"Last {days} days",
-                "pr_summaries": pr_summaries,
-                "message": f"Fetched {len(full_prs)} PRs with full details. "
-                f"Use get_appraisal_pr_details(file_path, pr_numbers) to get full info.",
+                "pr_titles": pr_titles,
+                "next_step": "Review titles above, then call "
+                "get_appraisal_pr_details(file_path, pr_numbers) for full details on selected PRs.",
             }
 
         except ToolError:
