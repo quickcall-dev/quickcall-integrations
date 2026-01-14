@@ -16,11 +16,10 @@ Parse `$ARGUMENTS` for time period:
 
 ## Instructions
 
-**IMPORTANT:** Only use these two MCP tools for appraisals:
-1. `prepare_appraisal_data` - fetches and dumps all PR data to a temp file
-2. `get_appraisal_pr_details` - reads specific PRs from that file (no API calls)
+**Two-step flow (avoids context overflow):**
 
-Do NOT use `get_prs`, `list_prs`, or any other tools - they will overflow context.
+1. `prepare_appraisal_data` → fetches all PRs, dumps to file, returns titles + PR numbers
+2. `get_appraisal_pr_details` → Claude picks which PRs to get details for, reads from file
 
 ---
 
@@ -28,9 +27,8 @@ Do NOT use `get_prs`, `list_prs`, or any other tools - they will overflow contex
 
    **Option A - GitHub API (preferred):**
    - Call `prepare_appraisal_data(days=X)` with the parsed time period
-   - This fetches ALL merged PRs with full stats in PARALLEL
-   - Dumps everything to a temp file (avoids context overflow)
-   - Returns: `file_path` + list of `pr_titles` (number, title, repo only)
+   - This fetches ALL merged PRs with full stats in PARALLEL and dumps to a temp file
+   - Returns: `file_path` + `pr_titles` (number, title, repo for each PR)
    - Optional: pass `org` or `repo` parameter to filter
 
    **Option B - Local Git (fallback):**
@@ -44,11 +42,10 @@ Do NOT use `get_prs`, `list_prs`, or any other tools - they will overflow contex
    - **Bug fixes**: (fix:, bugfix:, hotfix:, resolve, patch)
    - **Chores**: Maintenance work (docs:, test:, ci:, chore:, refactor:, bump)
 
-3. **Get details for top accomplishments:**
-   - Pick the top 5-10 significant PRs from the categorized list
-   - Call `get_appraisal_pr_details(file_path, [pr_numbers])`
-   - This reads from the temp file - NO additional API calls
-   - Returns full details: additions, deletions, files, body
+3. **Get full details for selected PRs:**
+   - Based on the titles, pick the top 5-10 significant PRs worth highlighting
+   - Call `get_appraisal_pr_details(file_path, [pr_numbers])` with the selected PR numbers
+   - Returns: full details (additions, deletions, files, body) for those PRs only
 
 4. **Calculate summary metrics:**
    - Total PRs merged by category
