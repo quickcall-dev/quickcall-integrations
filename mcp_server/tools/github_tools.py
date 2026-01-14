@@ -195,40 +195,60 @@ def create_github_tools(mcp: FastMCP) -> None:
             raise ToolError(f"Failed to list pull requests: {str(e)}")
 
     @mcp.tool(tags={"github", "prs"})
-    def get_pr(
-        pr_number: int = Field(..., description="Pull request number", gt=0),
-        owner: Optional[str] = Field(
-            default=None,
-            description="Repository owner. Uses your GitHub username if not specified.",
-        ),
-        repo: Optional[str] = Field(
-            default=None,
-            description="Repository name. Required.",
+    def get_prs(
+        pr_refs: List[dict] = Field(
+            ...,
+            description="List of PR references. Each item should have 'owner', 'repo', and 'number' keys. "
+            "Example: [{'owner': 'org', 'repo': 'myrepo', 'number': 123}, ...]",
         ),
     ) -> dict:
         """
-        Get detailed information about a specific pull request.
+        Get detailed information about one or more pull requests.
 
-        Includes title, description, status, files changed, and review status.
+        Works for single or multiple PRs - fetches in parallel when multiple.
+        Each PR ref needs owner, repo, and number.
+
+        Returns full PR details including additions, deletions, and files changed.
         Requires QuickCall authentication with GitHub connected.
         """
         try:
             client = _get_client()
-            pr = client.get_pr(pr_number, owner=owner, repo=repo)
 
-            if not pr:
-                raise ToolError(f"Pull request #{pr_number} not found")
+            # Validate input
+            validated_refs = []
+            for ref in pr_refs:
+                if not isinstance(ref, dict):
+                    raise ToolError(f"Invalid PR ref (must be dict): {ref}")
+                if "number" not in ref:
+                    raise ToolError(f"Missing 'number' in PR ref: {ref}")
+                if "owner" not in ref or "repo" not in ref:
+                    raise ToolError(
+                        f"Missing 'owner' or 'repo' in PR ref: {ref}. "
+                        "Each ref must have owner, repo, and number."
+                    )
+                validated_refs.append(
+                    {
+                        "owner": ref["owner"],
+                        "repo": ref["repo"],
+                        "number": int(ref["number"]),
+                    }
+                )
 
-            return {"pr": pr.model_dump()}
+            if not validated_refs:
+                return {"count": 0, "prs": []}
+
+            # Fetch all PRs in parallel
+            prs = client.fetch_prs_parallel(validated_refs, max_workers=10)
+
+            return {
+                "count": len(prs),
+                "requested": len(validated_refs),
+                "prs": prs,
+            }
         except ToolError:
             raise
-        except ValueError as e:
-            raise ToolError(
-                f"Repository not specified: {str(e)}. "
-                f"Please provide both owner and repo parameters."
-            )
         except Exception as e:
-            raise ToolError(f"Failed to get pull request #{pr_number}: {str(e)}")
+            raise ToolError(f"Failed to fetch PRs: {str(e)}")
 
     @mcp.tool(tags={"github", "commits"})
     def list_commits(
@@ -373,7 +393,7 @@ def create_github_tools(mcp: FastMCP) -> None:
         except Exception as e:
             raise ToolError(f"Failed to list branches: {str(e)}")
 
-    @mcp.tool(tags={"github", "prs", "appraisal"})
+    @mcp.tool(tags={"github", "prs"})
     def search_merged_prs(
         author: Optional[str] = Field(
             default=None,
@@ -404,24 +424,11 @@ def create_github_tools(mcp: FastMCP) -> None:
         """
         Search for merged pull requests by author within a time period.
 
-        USE FOR APPRAISALS: This tool is ideal for gathering contribution data
-        for performance reviews. Returns basic PR info - use get_pr for full
-        details (additions, deletions, files) on specific PRs.
+        NOTE: For appraisals/performance reviews, use prepare_appraisal_data instead!
+        It fetches all PRs with full stats in parallel and avoids context overflow.
 
-        Claude should analyze the returned PRs to:
-
-        1. CATEGORIZE by type (look at PR title/labels):
-           - Features: "feat:", "add:", "implement", "new", "create"
-           - Enhancements: "improve:", "update:", "perf:", "optimize", "enhance"
-           - Bug fixes: "fix:", "bugfix:", "hotfix:", "resolve", "patch"
-           - Chores: "chore:", "docs:", "test:", "ci:", "refactor:", "bump"
-
-        2. IDENTIFY top PRs worth highlighting (call get_pr for detailed metrics)
-
-        3. SUMMARIZE for appraisal with accomplishments grouped by category
-
-        Use detail_level='summary' (default) to avoid context overflow with large result sets.
-        Use get_pr(number) to get full details for specific PRs when needed.
+        This tool returns basic PR info without stats (additions, deletions).
+        Use detail_level='summary' (default) for large result sets.
 
         Requires QuickCall authentication with GitHub connected.
         """
@@ -486,14 +493,16 @@ def create_github_tools(mcp: FastMCP) -> None:
         """
         Prepare appraisal data by fetching ALL merged PRs with full details.
 
-        This tool:
-        1. Searches for all merged PRs by the author
-        2. Fetches FULL details (additions, deletions, files) for each PR IN PARALLEL
-        3. Dumps everything to a JSON file for later queries
-        4. Returns the file path + list of PR titles for Claude to review
+        USE THIS TOOL FOR APPRAISALS AND PERFORMANCE REVIEWS!
 
-        USE THIS for appraisals instead of search_merged_prs + multiple get_pr calls.
-        After calling this, use get_appraisal_pr_details to get full info for specific PRs.
+        This is the recommended tool for gathering contribution data because it:
+        1. Fetches ALL merged PRs with full stats (additions, deletions) in PARALLEL
+        2. Dumps everything to a local file (avoids context overflow)
+        3. Returns just PR titles for you to review
+        4. Then use get_appraisal_pr_details(file_path, pr_numbers) for selected PRs
+
+        DO NOT use search_merged_prs for appraisals - it doesn't include stats
+        and causes context overflow with large result sets.
         """
         import json
         import tempfile
