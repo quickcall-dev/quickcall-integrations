@@ -11,7 +11,7 @@ PAT fallback is useful for:
 - Testing and development
 """
 
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 import logging
 
 from fastmcp import FastMCP
@@ -154,19 +154,34 @@ def create_github_tools(mcp: FastMCP) -> None:
             default=20,
             description="Maximum number of PRs to return (default: 20)",
         ),
+        detail_level: str = Field(
+            default="summary",
+            description="'summary' for minimal fields (~200 bytes/PR: number, title, state, author, merged_at, html_url), "
+            "'full' for all fields (~2KB/PR). Use 'summary' for large result sets, 'full' for detailed analysis.",
+        ),
     ) -> dict:
         """
         List pull requests for a GitHub repository.
 
         Returns PRs sorted by last updated.
         Requires QuickCall authentication with GitHub connected.
+
+        Use detail_level='summary' (default) to avoid context overflow with large result sets.
+        Use get_pr(number) to get full details for specific PRs when needed.
         """
         try:
             client = _get_client()
-            prs = client.list_prs(owner=owner, repo=repo, state=state, limit=limit)
+            prs = client.list_prs(
+                owner=owner,
+                repo=repo,
+                state=state,
+                limit=limit,
+                detail_level=detail_level,
+            )
 
             return {
                 "count": len(prs),
+                "detail_level": detail_level,
                 "prs": [pr.model_dump() for pr in prs],
             }
         except ToolError:
@@ -241,12 +256,20 @@ def create_github_tools(mcp: FastMCP) -> None:
             default=20,
             description="Maximum number of commits to return (default: 20)",
         ),
+        detail_level: str = Field(
+            default="summary",
+            description="'summary' for minimal fields (short sha, message title, author, date, url), "
+            "'full' for all fields including full commit message. Use 'summary' for large result sets.",
+        ),
     ) -> dict:
         """
         List commits for a GitHub repository.
 
         Returns commits sorted by date (newest first).
         Requires QuickCall authentication with GitHub connected.
+
+        Use detail_level='summary' (default) to avoid context overflow with large result sets.
+        Use get_commit(sha) to get full details for specific commits when needed.
         """
         try:
             client = _get_client()
@@ -257,10 +280,12 @@ def create_github_tools(mcp: FastMCP) -> None:
                 author=author,
                 since=since,
                 limit=limit,
+                detail_level=detail_level,
             )
 
             return {
                 "count": len(commits),
+                "detail_level": detail_level,
                 "commits": [commit.model_dump() for commit in commits],
             }
         except ToolError:
@@ -370,6 +395,11 @@ def create_github_tools(mcp: FastMCP) -> None:
             default=100,
             description="Maximum PRs to return (default: 100)",
         ),
+        detail_level: str = Field(
+            default="summary",
+            description="'summary' for minimal fields (number, title, merged_at, repo, owner, html_url, author), "
+            "'full' adds body and labels. Use 'summary' for large result sets.",
+        ),
     ) -> dict:
         """
         Search for merged pull requests by author within a time period.
@@ -390,8 +420,8 @@ def create_github_tools(mcp: FastMCP) -> None:
 
         3. SUMMARIZE for appraisal with accomplishments grouped by category
 
-        Returns: number, title, body, merged_at, labels, repo, owner, html_url, author.
-        For full stats (additions, deletions, files), call get_pr on specific PRs.
+        Use detail_level='summary' (default) to avoid context overflow with large result sets.
+        Use get_pr(number) to get full details for specific PRs when needed.
 
         Requires QuickCall authentication with GitHub connected.
         """
@@ -399,9 +429,11 @@ def create_github_tools(mcp: FastMCP) -> None:
             client = _get_client()
 
             # Calculate since_date from days
-            from datetime import datetime, timedelta
+            from datetime import datetime, timedelta, timezone
 
-            since_date = (datetime.utcnow() - timedelta(days=days)).strftime("%Y-%m-%d")
+            since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+                "%Y-%m-%d"
+            )
 
             # Use authenticated user if author not specified
             if not author:
@@ -415,10 +447,12 @@ def create_github_tools(mcp: FastMCP) -> None:
                 org=org,
                 repo=repo,
                 limit=limit,
+                detail_level=detail_level,
             )
 
             return {
                 "count": len(prs),
+                "detail_level": detail_level,
                 "period": f"Last {days} days",
                 "author": author,
                 "org": org,
@@ -429,6 +463,179 @@ def create_github_tools(mcp: FastMCP) -> None:
             raise
         except Exception as e:
             raise ToolError(f"Failed to search merged PRs: {str(e)}")
+
+    @mcp.tool(tags={"github", "prs", "appraisal"})
+    def prepare_appraisal_data(
+        author: Optional[str] = Field(
+            default=None,
+            description="GitHub username. Defaults to authenticated user.",
+        ),
+        days: int = Field(
+            default=180,
+            description="Number of days to look back (default: 180 for ~6 months)",
+        ),
+        org: Optional[str] = Field(
+            default=None,
+            description="GitHub org to search within.",
+        ),
+        repo: Optional[str] = Field(
+            default=None,
+            description="Specific repo in 'owner/repo' format.",
+        ),
+    ) -> dict:
+        """
+        Prepare appraisal data by fetching ALL merged PRs with full details.
+
+        This tool:
+        1. Searches for all merged PRs by the author
+        2. Fetches FULL details (additions, deletions, files) for each PR IN PARALLEL
+        3. Dumps everything to a JSON file for later queries
+        4. Returns the file path + list of PR titles for Claude to review
+
+        USE THIS for appraisals instead of search_merged_prs + multiple get_pr calls.
+        After calling this, use get_appraisal_pr_details to get full info for specific PRs.
+        """
+        import json
+        import tempfile
+        from datetime import datetime, timedelta, timezone
+
+        try:
+            client = _get_client()
+
+            since_date = (datetime.now(timezone.utc) - timedelta(days=days)).strftime(
+                "%Y-%m-%d"
+            )
+
+            # Use authenticated user if author not specified
+            if not author:
+                creds = get_credential_store().get_api_credentials()
+                if creds and creds.github_username:
+                    author = creds.github_username
+
+            # Step 1: Get list of merged PRs
+            pr_list = client.search_merged_prs(
+                author=author,
+                since_date=since_date,
+                org=org,
+                repo=repo,
+                limit=100,
+                detail_level="full",  # Get body/labels from search
+            )
+
+            if not pr_list:
+                return {
+                    "count": 0,
+                    "message": "No merged PRs found for the specified criteria",
+                    "author": author,
+                    "period": f"Last {days} days",
+                }
+
+            # Step 2: Prepare refs for parallel fetch
+            pr_refs = [
+                {"owner": pr["owner"], "repo": pr["repo"], "number": pr["number"]}
+                for pr in pr_list
+            ]
+
+            # Step 3: Fetch full details in parallel
+            full_prs = client.fetch_prs_parallel(pr_refs, max_workers=10)
+
+            # Step 4: Merge search data with full PR data
+            # (search has body/labels, full PR has additions/deletions/files)
+            pr_lookup = {(pr["owner"], pr["repo"], pr["number"]): pr for pr in pr_list}
+            for pr in full_prs:
+                key = (pr["owner"], pr["repo"], pr["number"])
+                if key in pr_lookup:
+                    # Add labels from search (not in PyGithub response for some reason)
+                    search_pr = pr_lookup[key]
+                    if "labels" in search_pr:
+                        pr["labels"] = search_pr["labels"]
+
+            # Step 5: Dump to file
+            dump_data = {
+                "author": author,
+                "period": f"Last {days} days",
+                "org": org,
+                "repo": repo,
+                "fetched_at": datetime.now(timezone.utc).isoformat(),
+                "count": len(full_prs),
+                "prs": full_prs,
+            }
+
+            # Create temp file that persists
+            fd, file_path = tempfile.mkstemp(suffix=".json", prefix="appraisal_")
+            with open(file_path, "w") as f:
+                json.dump(dump_data, f, indent=2, default=str)
+
+            # Step 6: Return summary for Claude to review
+            pr_summaries = [
+                {
+                    "number": pr["number"],
+                    "title": pr["title"],
+                    "repo": f"{pr['owner']}/{pr['repo']}",
+                    "additions": pr.get("additions", 0),
+                    "deletions": pr.get("deletions", 0),
+                    "merged_at": pr.get("merged_at"),
+                }
+                for pr in full_prs
+            ]
+
+            return {
+                "file_path": file_path,
+                "count": len(full_prs),
+                "author": author,
+                "period": f"Last {days} days",
+                "pr_summaries": pr_summaries,
+                "message": f"Fetched {len(full_prs)} PRs with full details. "
+                f"Use get_appraisal_pr_details(file_path, pr_numbers) to get full info.",
+            }
+
+        except ToolError:
+            raise
+        except Exception as e:
+            raise ToolError(f"Failed to prepare appraisal data: {str(e)}")
+
+    @mcp.tool(tags={"github", "prs", "appraisal"})
+    def get_appraisal_pr_details(
+        file_path: str = Field(
+            ...,
+            description="Path to the appraisal data file from prepare_appraisal_data",
+        ),
+        pr_numbers: List[int] = Field(
+            ..., description="List of PR numbers to get full details for"
+        ),
+    ) -> dict:
+        """
+        Get full PR details from the appraisal data dump.
+
+        This reads from the local file created by prepare_appraisal_data.
+        NO API CALLS are made - all data comes from the cached dump.
+
+        Use this after prepare_appraisal_data to get full details for specific PRs
+        that Claude has identified as important for the appraisal.
+        """
+        import json
+
+        try:
+            with open(file_path) as f:
+                data = json.load(f)
+
+            pr_numbers_set = set(pr_numbers)
+            selected_prs = [
+                pr for pr in data.get("prs", []) if pr["number"] in pr_numbers_set
+            ]
+
+            return {
+                "count": len(selected_prs),
+                "requested": len(pr_numbers),
+                "prs": selected_prs,
+            }
+
+        except FileNotFoundError:
+            raise ToolError(f"Appraisal data file not found: {file_path}")
+        except json.JSONDecodeError:
+            raise ToolError(f"Invalid JSON in appraisal data file: {file_path}")
+        except Exception as e:
+            raise ToolError(f"Failed to read appraisal data: {str(e)}")
 
     @mcp.tool(tags={"github", "status"})
     def check_github_connection() -> dict:

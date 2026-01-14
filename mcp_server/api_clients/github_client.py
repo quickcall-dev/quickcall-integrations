@@ -6,6 +6,7 @@ Focuses on PRs and commits for minimal implementation.
 """
 
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 
@@ -22,7 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 class Commit(BaseModel):
-    """Represents a GitHub commit."""
+    """Represents a GitHub commit (full details)."""
 
     sha: str
     message: str
@@ -31,8 +32,18 @@ class Commit(BaseModel):
     html_url: str
 
 
+class CommitSummary(BaseModel):
+    """Represents a GitHub commit (summary - minimal fields for list operations)."""
+
+    sha: str
+    message_title: str  # First line only
+    author: str
+    date: datetime
+    html_url: str
+
+
 class PullRequest(BaseModel):
-    """Represents a GitHub pull request."""
+    """Represents a GitHub pull request (full details)."""
 
     number: int
     title: str
@@ -53,6 +64,18 @@ class PullRequest(BaseModel):
     mergeable: Optional[bool] = None
     labels: List[str] = []
     reviewers: List[str] = []
+
+
+class PullRequestSummary(BaseModel):
+    """Represents a GitHub pull request (summary - minimal fields for list operations)."""
+
+    number: int
+    title: str
+    state: str
+    author: str
+    created_at: datetime
+    merged_at: Optional[datetime] = None
+    html_url: str
 
 
 class Repository(BaseModel):
@@ -298,7 +321,8 @@ class GitHubClient:
         repo: Optional[str] = None,
         state: str = "open",
         limit: int = 20,
-    ) -> List[PullRequest]:
+        detail_level: str = "summary",
+    ) -> List[PullRequest] | List[PullRequestSummary]:
         """
         List pull requests.
 
@@ -307,9 +331,11 @@ class GitHubClient:
             repo: Repository name
             state: PR state: 'open', 'closed', or 'all'
             limit: Maximum PRs to return
+            detail_level: 'summary' for minimal fields (~200 bytes/PR),
+                         'full' for all fields (~2KB/PR)
 
         Returns:
-            List of pull requests
+            List of pull requests (summary or full based on detail_level)
         """
         gh_repo = self._get_repo(owner, repo)
         prs = []
@@ -319,7 +345,10 @@ class GitHubClient:
             for i, pr in enumerate(pulls):
                 if i >= limit:
                     break
-                prs.append(self._convert_pr(pr))
+                if detail_level == "full":
+                    prs.append(self._convert_pr(pr))
+                else:
+                    prs.append(self._convert_pr_summary(pr))
         except IndexError:
             # Empty repo or no PRs - return empty list
             pass
@@ -353,7 +382,7 @@ class GitHubClient:
             raise
 
     def _convert_pr(self, pr) -> PullRequest:
-        """Convert PyGithub PullRequest to Pydantic model."""
+        """Convert PyGithub PullRequest to Pydantic model (full details)."""
         return PullRequest(
             number=pr.number,
             title=pr.title,
@@ -376,6 +405,18 @@ class GitHubClient:
             reviewers=[r.login for r in pr.requested_reviewers],
         )
 
+    def _convert_pr_summary(self, pr) -> PullRequestSummary:
+        """Convert PyGithub PullRequest to summary model (minimal fields)."""
+        return PullRequestSummary(
+            number=pr.number,
+            title=pr.title,
+            state=pr.state,
+            author=pr.user.login if pr.user else "unknown",
+            created_at=pr.created_at,
+            merged_at=pr.merged_at,
+            html_url=pr.html_url,
+        )
+
     # ========================================================================
     # Commit Operations
     # ========================================================================
@@ -388,7 +429,8 @@ class GitHubClient:
         author: Optional[str] = None,
         since: Optional[str] = None,
         limit: int = 20,
-    ) -> List[Commit]:
+        detail_level: str = "summary",
+    ) -> List[Commit] | List[CommitSummary]:
         """
         List commits.
 
@@ -399,9 +441,10 @@ class GitHubClient:
             author: Filter by author username
             since: ISO datetime - only commits after this date
             limit: Maximum commits to return
+            detail_level: 'summary' for minimal fields, 'full' for all fields
 
         Returns:
-            List of commits
+            List of commits (summary or full based on detail_level)
         """
         gh_repo = self._get_repo(owner, repo)
 
@@ -427,15 +470,28 @@ class GitHubClient:
             if author and author.lower() != commit_author.lower():
                 continue
 
-            commits.append(
-                Commit(
-                    sha=commit.sha,
-                    message=commit.commit.message,
-                    author=commit_author,
-                    date=commit.commit.author.date,
-                    html_url=commit.html_url,
+            if detail_level == "full":
+                commits.append(
+                    Commit(
+                        sha=commit.sha,
+                        message=commit.commit.message,
+                        author=commit_author,
+                        date=commit.commit.author.date,
+                        html_url=commit.html_url,
+                    )
                 )
-            )
+            else:
+                # Summary: just first line of message
+                message_title = commit.commit.message.split("\n")[0][:100]
+                commits.append(
+                    CommitSummary(
+                        sha=commit.sha[:7],  # Short SHA for summary
+                        message_title=message_title,
+                        author=commit_author,
+                        date=commit.commit.author.date,
+                        html_url=commit.html_url,
+                    )
+                )
 
         return commits
 
@@ -533,6 +589,7 @@ class GitHubClient:
         org: Optional[str] = None,
         repo: Optional[str] = None,
         limit: int = 100,
+        detail_level: str = "summary",
     ) -> List[Dict[str, Any]]:
         """
         Search for merged pull requests using GitHub Search API.
@@ -545,10 +602,11 @@ class GitHubClient:
             org: GitHub org to search within
             repo: Specific repo in "owner/repo" format (overrides org if specified)
             limit: Maximum PRs to return (max 100 per page)
+            detail_level: 'summary' for minimal fields, 'full' for all fields
 
         Returns:
-            List of merged PR dicts with: number, title, body, merged_at,
-            labels, repo, owner, html_url
+            List of merged PR dicts. Summary includes: number, title, merged_at,
+            repo, owner, html_url, author. Full adds: body, labels.
         """
         # Build search query
         query_parts = ["is:pr", "is:merged"]
@@ -596,19 +654,35 @@ class GitHubClient:
                 repo_owner = repo_url_parts[-2] if len(repo_url_parts) >= 2 else ""
                 repo_name = repo_url_parts[-1] if len(repo_url_parts) >= 1 else ""
 
-                prs.append(
-                    {
-                        "number": item["number"],
-                        "title": item["title"],
-                        "body": item.get("body") or "",
-                        "merged_at": item.get("pull_request", {}).get("merged_at"),
-                        "html_url": item["html_url"],
-                        "labels": [label["name"] for label in item.get("labels", [])],
-                        "repo": repo_name,
-                        "owner": repo_owner,
-                        "author": item.get("user", {}).get("login", "unknown"),
-                    }
-                )
+                if detail_level == "full":
+                    prs.append(
+                        {
+                            "number": item["number"],
+                            "title": item["title"],
+                            "body": item.get("body") or "",
+                            "merged_at": item.get("pull_request", {}).get("merged_at"),
+                            "html_url": item["html_url"],
+                            "labels": [
+                                label["name"] for label in item.get("labels", [])
+                            ],
+                            "repo": repo_name,
+                            "owner": repo_owner,
+                            "author": item.get("user", {}).get("login", "unknown"),
+                        }
+                    )
+                else:
+                    # Summary: skip body and labels
+                    prs.append(
+                        {
+                            "number": item["number"],
+                            "title": item["title"],
+                            "merged_at": item.get("pull_request", {}).get("merged_at"),
+                            "html_url": item["html_url"],
+                            "repo": repo_name,
+                            "owner": repo_owner,
+                            "author": item.get("user", {}).get("login", "unknown"),
+                        }
+                    )
 
             return prs
 
@@ -618,3 +692,60 @@ class GitHubClient:
         except Exception as e:
             logger.error(f"Failed to search PRs: {e}")
             raise
+
+    def fetch_prs_parallel(
+        self,
+        pr_refs: List[Dict[str, Any]],
+        max_workers: int = 10,
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch full PR details for multiple PRs in parallel.
+
+        Args:
+            pr_refs: List of dicts with 'owner', 'repo', 'number' keys
+            max_workers: Max concurrent requests (default: 10)
+
+        Returns:
+            List of full PR details with stats (additions, deletions, files)
+        """
+        results = []
+        errors = []
+
+        def fetch_single_pr(pr_ref: Dict[str, Any]) -> Dict[str, Any] | None:
+            try:
+                owner = pr_ref["owner"]
+                repo = pr_ref["repo"]
+                number = pr_ref["number"]
+                pr = self.get_pr(number, owner=owner, repo=repo)
+                if pr:
+                    pr_dict = pr.model_dump()
+                    # Add owner/repo for context
+                    pr_dict["owner"] = owner
+                    pr_dict["repo"] = repo
+                    return pr_dict
+                return None
+            except Exception as e:
+                logger.warning(f"Failed to fetch PR {pr_ref}: {e}")
+                return None
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(fetch_single_pr, pr_ref): pr_ref for pr_ref in pr_refs
+            }
+
+            for future in as_completed(futures):
+                pr_ref = futures[future]
+                try:
+                    result = future.result()
+                    if result:
+                        results.append(result)
+                    else:
+                        errors.append(pr_ref)
+                except Exception as e:
+                    logger.error(f"Error fetching {pr_ref}: {e}")
+                    errors.append(pr_ref)
+
+        if errors:
+            logger.warning(f"Failed to fetch {len(errors)} PRs: {errors[:5]}...")
+
+        return results
