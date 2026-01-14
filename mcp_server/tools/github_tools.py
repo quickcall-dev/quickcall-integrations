@@ -164,10 +164,8 @@ def create_github_tools(mcp: FastMCP) -> None:
         List pull requests for a GitHub repository.
 
         Returns PRs sorted by last updated.
-        Requires QuickCall authentication with GitHub connected.
-
-        Use detail_level='summary' (default) to avoid context overflow with large result sets.
-        Use get_pr(number) to get full details for specific PRs when needed.
+        Use detail_level='summary' (default) to avoid context overflow.
+        Use get_prs() to fetch full details for specific PRs.
         """
         try:
             client = _get_client()
@@ -286,10 +284,8 @@ def create_github_tools(mcp: FastMCP) -> None:
         List commits for a GitHub repository.
 
         Returns commits sorted by date (newest first).
-        Requires QuickCall authentication with GitHub connected.
-
-        Use detail_level='summary' (default) to avoid context overflow with large result sets.
-        Use get_commit(sha) to get full details for specific commits when needed.
+        Use detail_level='summary' (default) to avoid context overflow.
+        Use get_commit(sha) for full details on a specific commit.
         """
         try:
             client = _get_client()
@@ -413,18 +409,17 @@ def create_github_tools(mcp: FastMCP) -> None:
         ),
     ) -> dict:
         """
-        Prepare appraisal data by fetching ALL merged PRs with full details.
+        Fetch all merged PRs for appraisals/performance reviews.
 
-        USE THIS TOOL FOR APPRAISALS AND PERFORMANCE REVIEWS!
+        Returns:
+        - file_path: temp file with full PR data (additions, deletions, files)
+        - pr_titles: list of {number, title, repo} for Claude to review
+        - count: total PRs found
 
-        This is the recommended tool for gathering contribution data because it:
-        1. Fetches ALL merged PRs with full stats (additions, deletions) in PARALLEL
-        2. Dumps everything to a local file (avoids context overflow)
-        3. Returns just PR titles for you to review
-        4. Then use get_appraisal_pr_details(file_path, pr_numbers) for selected PRs
-
-        DO NOT use search_merged_prs for appraisals - it doesn't include stats
-        and causes context overflow with large result sets.
+        Workflow:
+        1. Call this tool → get file_path and pr_titles
+        2. Review pr_titles, pick significant PRs
+        3. Call get_appraisal_pr_details(file_path, [pr_numbers]) for full details
         """
         import json
         import tempfile
@@ -533,13 +528,12 @@ def create_github_tools(mcp: FastMCP) -> None:
         ),
     ) -> dict:
         """
-        Get full PR details from the appraisal data dump.
+        Read full PR details from the appraisal data file.
 
-        This reads from the local file created by prepare_appraisal_data.
-        NO API CALLS are made - all data comes from the cached dump.
+        Call this after prepare_appraisal_data with selected PR numbers.
+        Reads from the cached file - no API calls made.
 
-        Use this after prepare_appraisal_data to get full details for specific PRs
-        that Claude has identified as important for the appraisal.
+        Returns: additions, deletions, files changed, body for selected PRs.
         """
         import json
 
