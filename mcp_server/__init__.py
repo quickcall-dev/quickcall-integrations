@@ -3,4 +3,10 @@ MCP Server for QuickCall
 GitHub integration tools for AI assistant
 """
 
-__version__ = "0.1.8"
+from importlib.metadata import version, PackageNotFoundError
+
+try:
+    __version__ = version("quickcall-integrations")
+except PackageNotFoundError:
+    # Package not installed (development mode)
+    __version__ = "0.0.0-dev"
