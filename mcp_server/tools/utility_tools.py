@@ -5,6 +5,7 @@ Provides datetime helpers useful for constructing queries:
 - Get current datetime
 - Calculate date ranges (e.g., "last 7 days")
 - Add/subtract time from dates
+- Get MCP server version
 """
 
 from datetime import datetime, timezone, timedelta
@@ -12,6 +13,8 @@ from typing import Optional
 
 from fastmcp import FastMCP
 from pydantic import Field
+
+from mcp_server import __version__
 
 
 def create_utility_tools(mcp: FastMCP) -> None:
@@ -112,4 +115,20 @@ def create_utility_tools(mcp: FastMCP) -> None:
             "datetime": result.isoformat().replace("+00:00", "Z"),
             "base_date": base.isoformat().replace("+00:00", "Z"),
             "offset": f"{days} days, {hours} hours",
+        }
+
+    @mcp.tool(tags={"utility", "version"})
+    def get_mcp_version() -> dict:
+        """
+        Get the QuickCall MCP server version.
+
+        Returns the version from pyproject.toml (single source of truth).
+        Useful for debugging and verifying which version is running.
+
+        Returns:
+            Version info including version string and package name
+        """
+        return {
+            "package": "quickcall-integrations",
+            "version": __version__,
         }

@@ -1459,13 +1459,14 @@ wheels = [
 
 [[package]]
 name = "quickcall-integrations"
-version = "0.3.0"
+version = "0.3.4"
 source = { editable = "." }
 dependencies = [
     { name = "fastmcp" },
     { name = "httpx" },
     { name = "pydantic" },
     { name = "pygithub" },
+    { name = "pyyaml" },
     { name = "rapidfuzz" },
 ]
 
@@ -1484,6 +1485,7 @@ requires-dist = [
     { name = "httpx", specifier = ">=0.28.0" },
     { name = "pydantic", specifier = ">=2.11.7" },
     { name = "pygithub", specifier = ">=2.8.1" },
+    { name = "pyyaml", specifier = ">=6.0" },
     { name = "rapidfuzz", specifier = ">=3.0.0" },
 ]
 

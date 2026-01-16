@@ -2,35 +2,92 @@
 GitHub Tools - Pull requests and commits via GitHub API.
 
 Authentication (in priority order):
-1. QuickCall GitHub App (preferred) - connect via connect_quickcall
-2. Personal Access Token (PAT) - set GITHUB_TOKEN env var or use .quickcall.env file
+1. Personal Access Token (PAT) - more permissions, user's default choice
+   - Set via connect_github_via_pat command
+   - Or GITHUB_TOKEN env var / .quickcall.env file
+2. QuickCall GitHub App - fallback if no PAT configured
 
-PAT fallback is useful for:
-- Users at organizations that can't install the GitHub App
-- Personal repositories without app installation
-- Testing and development
+PAT is preferred because:
+- Users have direct control over permissions
+- Works with any repository the user has access to
+- No GitHub App installation required
 """
 
-from typing import List, Optional, Tuple
 import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
+from mcp_server.api_clients.github_client import GitHubClient
 from mcp_server.auth import (
     get_credential_store,
     get_github_pat,
     get_github_pat_username,
 )
-from mcp_server.api_clients.github_client import GitHubClient
+from mcp_server.auth.credentials import _find_project_root, _parse_env_file
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Issue Template Support
+# ============================================================================
+
+DEFAULT_ISSUE_TEMPLATE: Dict[str, Any] = {
+    "labels": [],
+    "body": "## Description\n\n## Details\n",
+}
+
+
+def _load_issue_template(template_type: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load issue template from ISSUE_TEMPLATE_PATH in .quickcall.env.
+    Returns defaults if not configured.
+    """
+    template_path = os.getenv("ISSUE_TEMPLATE_PATH")
+
+    # Check .quickcall.env in project root
+    if not template_path:
+        project_root = _find_project_root()
+        if project_root:
+            config_path = project_root / ".quickcall.env"
+            if config_path.exists():
+                env_vars = _parse_env_file(config_path)
+                if "ISSUE_TEMPLATE_PATH" in env_vars:
+                    template_path = env_vars["ISSUE_TEMPLATE_PATH"]
+                    if not Path(template_path).is_absolute():
+                        template_path = str(project_root / template_path)
+
+    if not template_path:
+        return DEFAULT_ISSUE_TEMPLATE
+
+    try:
+        with open(template_path) as f:
+            config = yaml.safe_load(f) or {}
+
+        # If template_type specified, look for it in templates section
+        if template_type and "templates" in config:
+            return config["templates"].get(
+                template_type, config.get("defaults", DEFAULT_ISSUE_TEMPLATE)
+            )
+
+        return config.get("defaults", DEFAULT_ISSUE_TEMPLATE)
+    except Exception as e:
+        logger.warning(f"Failed to load issue template: {e}")
+        return DEFAULT_ISSUE_TEMPLATE
 
 
 # Track whether we're using PAT mode for status reporting
 _using_pat_mode: bool = False
 _pat_source: Optional[str] = None
+
+# Module-level client cache (keyed by token hash for security)
+_client_cache: Optional[Tuple[int, GitHubClient]] = None
 
 
 def _get_client() -> GitHubClient:
@@ -38,59 +95,80 @@ def _get_client() -> GitHubClient:
     Get the GitHub client using the best available authentication method.
 
     Authentication priority:
-    1. QuickCall GitHub App (if connected and working)
-    2. Personal Access Token from environment/config file
+    1. Personal Access Token (PAT) - preferred, more permissions
+    2. QuickCall GitHub App - fallback if no PAT
+
+    Uses cached client if token hasn't changed.
 
     Raises:
         ToolError: If no authentication method is available
     """
-    global _using_pat_mode, _pat_source
+    global _using_pat_mode, _pat_source, _client_cache
 
     store = get_credential_store()
 
-    # Try QuickCall GitHub App first (preferred)
-    if store.is_authenticated():
-        creds = store.get_api_credentials()
-        if creds and creds.github_connected and creds.github_token:
-            _using_pat_mode = False
-            _pat_source = None
-            return GitHubClient(
-                token=creds.github_token,
-                default_owner=creds.github_username,
-                installation_id=creds.github_installation_id,
-            )
-
-    # Try PAT fallback
-    pat_token, pat_source = get_github_pat()
+    # Try PAT first (preferred - user has more control)
+    pat_token, pat_source_str = get_github_pat()
     if pat_token:
+        token_hash = hash(pat_token)
+
+        # Return cached client if token matches
+        if _client_cache and _client_cache[0] == token_hash:
+            return _client_cache[1]
+
         _using_pat_mode = True
-        _pat_source = pat_source
+        _pat_source = pat_source_str
         pat_username = get_github_pat_username()
-        logger.info(f"Using GitHub PAT from {pat_source}")
-        return GitHubClient(
+        logger.info(f"Using GitHub PAT from {pat_source_str}")
+
+        client = GitHubClient(
             token=pat_token,
             default_owner=pat_username,
             installation_id=None,  # No installation ID for PAT
         )
+        _client_cache = (token_hash, client)
+        return client
+
+    # Fall back to QuickCall GitHub App
+    if store.is_authenticated():
+        creds = store.get_api_credentials()
+        if creds and creds.github_connected and creds.github_token:
+            token_hash = hash(creds.github_token)
+
+            # Return cached client if token matches
+            if _client_cache and _client_cache[0] == token_hash:
+                return _client_cache[1]
+
+            _using_pat_mode = False
+            _pat_source = None
+
+            client = GitHubClient(
+                token=creds.github_token,
+                default_owner=creds.github_username,
+                installation_id=creds.github_installation_id,
+            )
+            _client_cache = (token_hash, client)
+            return client
 
     # No authentication available - provide helpful error message
     _using_pat_mode = False
     _pat_source = None
+    _client_cache = None
 
     if store.is_authenticated():
         # Connected to QuickCall but GitHub not connected
         raise ToolError(
             "GitHub not connected. Options:\n"
-            "1. Connect GitHub App at quickcall.dev/assistant (recommended)\n"
-            "2. Run connect_github_via_pat with your Personal Access Token\n"
+            "1. Run connect_github_via_pat with your Personal Access Token (recommended)\n"
+            "2. Connect GitHub App at quickcall.dev/assistant\n"
             "3. Set GITHUB_TOKEN environment variable"
         )
     else:
         # Not connected to QuickCall at all
         raise ToolError(
             "GitHub authentication required. Options:\n"
-            "1. Run connect_quickcall to use QuickCall (full access to GitHub + Slack)\n"
-            "2. Run connect_github_via_pat with a Personal Access Token (GitHub only)\n"
+            "1. Run connect_github_via_pat with a Personal Access Token (recommended)\n"
+            "2. Run connect_quickcall to use QuickCall (GitHub App + Slack)\n"
             "3. Set GITHUB_TOKEN environment variable\n\n"
             "For PAT: Create token at https://github.com/settings/tokens\n"
             "Required scopes: repo (private) or public_repo (public only)"
@@ -388,6 +466,128 @@ def create_github_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             raise ToolError(f"Failed to list branches: {str(e)}")
+
+    @mcp.tool(tags={"github", "issues"})
+    def manage_issues(
+        action: str = Field(
+            ...,
+            description="Action: 'create', 'update', 'close', 'reopen', or 'comment'",
+        ),
+        issue_numbers: Optional[List[int]] = Field(
+            default=None,
+            description="Issue number(s). Required for update/close/reopen/comment. Supports bulk operations.",
+        ),
+        title: Optional[str] = Field(
+            default=None,
+            description="Issue title (for 'create' or 'update')",
+        ),
+        body: Optional[str] = Field(
+            default=None,
+            description="Issue body (for 'create'/'update') or comment text (for 'comment')",
+        ),
+        labels: Optional[List[str]] = Field(
+            default=None,
+            description="Labels (for 'create' or 'update')",
+        ),
+        assignees: Optional[List[str]] = Field(
+            default=None,
+            description="GitHub usernames to assign",
+        ),
+        template: Optional[str] = Field(
+            default=None,
+            description="Template name for 'create' (e.g., 'bug', 'feature')",
+        ),
+        owner: Optional[str] = Field(
+            default=None,
+            description="Repository owner",
+        ),
+        repo: Optional[str] = Field(
+            default=None,
+            description="Repository name. Required.",
+        ),
+    ) -> dict:
+        """
+        Manage GitHub issues: create, update, close, reopen, or comment.
+
+        Supports bulk operations for close/reopen/comment via issue_numbers list.
+
+        Examples:
+        - create: manage_issues(action="create", title="Bug", template="bug")
+        - close multiple: manage_issues(action="close", issue_numbers=[1, 2, 3])
+        - comment: manage_issues(action="comment", issue_numbers=[42], body="Fixed!")
+        """
+        try:
+            client = _get_client()
+
+            if action == "create":
+                if not title:
+                    raise ToolError("'title' is required for 'create' action")
+
+                tpl = _load_issue_template(template)
+                final_body = body if body is not None else tpl.get("body", "")
+                final_labels = labels if labels is not None else tpl.get("labels", [])
+
+                issue = client.create_issue(
+                    title=title,
+                    body=final_body,
+                    labels=final_labels,
+                    assignees=assignees,
+                    owner=owner,
+                    repo=repo,
+                )
+                return {"action": "created", "issue": issue}
+
+            # All other actions require issue_numbers
+            if not issue_numbers:
+                raise ToolError(f"'issue_numbers' required for '{action}' action")
+
+            results = []
+            for issue_number in issue_numbers:
+                if action == "update":
+                    client.update_issue(
+                        issue_number=issue_number,
+                        title=title,
+                        body=body,
+                        labels=labels,
+                        assignees=assignees,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append({"number": issue_number, "status": "updated"})
+
+                elif action == "close":
+                    client.close_issue(issue_number, owner=owner, repo=repo)
+                    results.append({"number": issue_number, "status": "closed"})
+
+                elif action == "reopen":
+                    client.reopen_issue(issue_number, owner=owner, repo=repo)
+                    results.append({"number": issue_number, "status": "reopened"})
+
+                elif action == "comment":
+                    if not body:
+                        raise ToolError("'body' is required for 'comment' action")
+                    comment = client.comment_on_issue(
+                        issue_number, body=body, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "status": "commented",
+                            "comment_url": comment["html_url"],
+                        }
+                    )
+
+                else:
+                    raise ToolError(f"Invalid action: {action}")
+
+            return {"action": action, "count": len(results), "results": results}
+
+        except ToolError:
+            raise
+        except ValueError as e:
+            raise ToolError(f"Repository not specified: {str(e)}")
+        except Exception as e:
+            raise ToolError(f"Failed to {action} issue(s): {str(e)}")
 
     @mcp.tool(tags={"github", "prs", "appraisal"})
     def prepare_appraisal_data(
