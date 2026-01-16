@@ -353,9 +353,9 @@ class CredentialStore:
             api_creds = self.get_api_credentials(force_refresh=True)
             result["github"] = {
                 "connected": api_creds.github_connected if api_creds else False,
-                "mode": "github_app"
-                if (api_creds and api_creds.github_connected)
-                else None,
+                "mode": (
+                    "github_app" if (api_creds and api_creds.github_connected) else None
+                ),
                 "username": api_creds.github_username if api_creds else None,
             }
             result["slack"] = {

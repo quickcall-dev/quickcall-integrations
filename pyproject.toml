@@ -8,6 +8,7 @@ dependencies = [
     "fastmcp>=2.13.0",
     "pydantic>=2.11.7",
     "PyGithub>=2.8.1",
+    "PyYAML>=6.0",
     "httpx>=0.28.0",
     "rapidfuzz>=3.0.0",
 ]

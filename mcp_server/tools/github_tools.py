@@ -11,21 +11,73 @@ PAT fallback is useful for:
 - Testing and development
 """
 
-from typing import List, Optional, Tuple
 import logging
+import os
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
 
+import yaml
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
 
+from mcp_server.api_clients.github_client import GitHubClient
 from mcp_server.auth import (
     get_credential_store,
     get_github_pat,
     get_github_pat_username,
 )
-from mcp_server.api_clients.github_client import GitHubClient
+from mcp_server.auth.credentials import _find_project_root, _parse_env_file
 
 logger = logging.getLogger(__name__)
+
+
+# ============================================================================
+# Issue Template Support
+# ============================================================================
+
+DEFAULT_ISSUE_TEMPLATE: Dict[str, Any] = {
+    "labels": [],
+    "body": "## Description\n\n## Details\n",
+}
+
+
+def _load_issue_template(template_type: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load issue template from ISSUE_TEMPLATE_PATH in .quickcall.env.
+    Returns defaults if not configured.
+    """
+    template_path = os.getenv("ISSUE_TEMPLATE_PATH")
+
+    # Check .quickcall.env in project root
+    if not template_path:
+        project_root = _find_project_root()
+        if project_root:
+            config_path = project_root / ".quickcall.env"
+            if config_path.exists():
+                env_vars = _parse_env_file(config_path)
+                if "ISSUE_TEMPLATE_PATH" in env_vars:
+                    template_path = env_vars["ISSUE_TEMPLATE_PATH"]
+                    if not Path(template_path).is_absolute():
+                        template_path = str(project_root / template_path)
+
+    if not template_path:
+        return DEFAULT_ISSUE_TEMPLATE
+
+    try:
+        with open(template_path) as f:
+            config = yaml.safe_load(f) or {}
+
+        # If template_type specified, look for it in templates section
+        if template_type and "templates" in config:
+            return config["templates"].get(
+                template_type, config.get("defaults", DEFAULT_ISSUE_TEMPLATE)
+            )
+
+        return config.get("defaults", DEFAULT_ISSUE_TEMPLATE)
+    except Exception as e:
+        logger.warning(f"Failed to load issue template: {e}")
+        return DEFAULT_ISSUE_TEMPLATE
 
 
 # Track whether we're using PAT mode for status reporting
@@ -388,6 +440,128 @@ def create_github_tools(mcp: FastMCP) -> None:
             )
         except Exception as e:
             raise ToolError(f"Failed to list branches: {str(e)}")
+
+    @mcp.tool(tags={"github", "issues"})
+    def manage_issues(
+        action: str = Field(
+            ...,
+            description="Action: 'create', 'update', 'close', 'reopen', or 'comment'",
+        ),
+        issue_numbers: Optional[List[int]] = Field(
+            default=None,
+            description="Issue number(s). Required for update/close/reopen/comment. Supports bulk operations.",
+        ),
+        title: Optional[str] = Field(
+            default=None,
+            description="Issue title (for 'create' or 'update')",
+        ),
+        body: Optional[str] = Field(
+            default=None,
+            description="Issue body (for 'create'/'update') or comment text (for 'comment')",
+        ),
+        labels: Optional[List[str]] = Field(
+            default=None,
+            description="Labels (for 'create' or 'update')",
+        ),
+        assignees: Optional[List[str]] = Field(
+            default=None,
+            description="GitHub usernames to assign",
+        ),
+        template: Optional[str] = Field(
+            default=None,
+            description="Template name for 'create' (e.g., 'bug', 'feature')",
+        ),
+        owner: Optional[str] = Field(
+            default=None,
+            description="Repository owner",
+        ),
+        repo: Optional[str] = Field(
+            default=None,
+            description="Repository name. Required.",
+        ),
+    ) -> dict:
+        """
+        Manage GitHub issues: create, update, close, reopen, or comment.
+
+        Supports bulk operations for close/reopen/comment via issue_numbers list.
+
+        Examples:
+        - create: manage_issues(action="create", title="Bug", template="bug")
+        - close multiple: manage_issues(action="close", issue_numbers=[1, 2, 3])
+        - comment: manage_issues(action="comment", issue_numbers=[42], body="Fixed!")
+        """
+        try:
+            client = _get_client()
+
+            if action == "create":
+                if not title:
+                    raise ToolError("'title' is required for 'create' action")
+
+                tpl = _load_issue_template(template)
+                final_body = body if body is not None else tpl.get("body", "")
+                final_labels = labels if labels is not None else tpl.get("labels", [])
+
+                issue = client.create_issue(
+                    title=title,
+                    body=final_body,
+                    labels=final_labels,
+                    assignees=assignees,
+                    owner=owner,
+                    repo=repo,
+                )
+                return {"action": "created", "issue": issue}
+
+            # All other actions require issue_numbers
+            if not issue_numbers:
+                raise ToolError(f"'issue_numbers' required for '{action}' action")
+
+            results = []
+            for issue_number in issue_numbers:
+                if action == "update":
+                    client.update_issue(
+                        issue_number=issue_number,
+                        title=title,
+                        body=body,
+                        labels=labels,
+                        assignees=assignees,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append({"number": issue_number, "status": "updated"})
+
+                elif action == "close":
+                    client.close_issue(issue_number, owner=owner, repo=repo)
+                    results.append({"number": issue_number, "status": "closed"})
+
+                elif action == "reopen":
+                    client.reopen_issue(issue_number, owner=owner, repo=repo)
+                    results.append({"number": issue_number, "status": "reopened"})
+
+                elif action == "comment":
+                    if not body:
+                        raise ToolError("'body' is required for 'comment' action")
+                    comment = client.comment_on_issue(
+                        issue_number, body=body, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "status": "commented",
+                            "comment_url": comment["html_url"],
+                        }
+                    )
+
+                else:
+                    raise ToolError(f"Invalid action: {action}")
+
+            return {"action": action, "count": len(results), "results": results}
+
+        except ToolError:
+            raise
+        except ValueError as e:
+            raise ToolError(f"Repository not specified: {str(e)}")
+        except Exception as e:
+            raise ToolError(f"Failed to {action} issue(s): {str(e)}")
 
     @mcp.tool(tags={"github", "prs", "appraisal"})
     def prepare_appraisal_data(

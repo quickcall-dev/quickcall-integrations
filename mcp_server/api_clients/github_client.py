@@ -579,6 +579,114 @@ class GitHubClient:
         return branches
 
     # ========================================================================
+    # Issue Operations
+    # ========================================================================
+
+    def _issue_to_dict(self, issue) -> Dict[str, Any]:
+        """Convert PyGithub Issue to dict."""
+        return {
+            "number": issue.number,
+            "title": issue.title,
+            "body": issue.body,
+            "state": issue.state,
+            "html_url": issue.html_url,
+            "labels": [label.name for label in issue.labels],
+            "assignees": [a.login for a in issue.assignees],
+            "created_at": issue.created_at.isoformat(),
+        }
+
+    def create_issue(
+        self,
+        title: str,
+        body: Optional[str] = None,
+        labels: Optional[List[str]] = None,
+        assignees: Optional[List[str]] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create a GitHub issue."""
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.create_issue(
+            title=title,
+            body=body or "",
+            labels=labels or [],
+            assignees=assignees or [],
+        )
+        return self._issue_to_dict(issue)
+
+    def update_issue(
+        self,
+        issue_number: int,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+        labels: Optional[List[str]] = None,
+        assignees: Optional[List[str]] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update a GitHub issue."""
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(issue_number)
+
+        kwargs = {}
+        if title is not None:
+            kwargs["title"] = title
+        if body is not None:
+            kwargs["body"] = body
+        if labels is not None:
+            kwargs["labels"] = labels
+        if assignees is not None:
+            kwargs["assignees"] = assignees
+
+        if kwargs:
+            issue.edit(**kwargs)
+
+        return self._issue_to_dict(issue)
+
+    def close_issue(
+        self,
+        issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Close a GitHub issue."""
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(issue_number)
+        issue.edit(state="closed")
+        return self._issue_to_dict(issue)
+
+    def reopen_issue(
+        self,
+        issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Reopen a GitHub issue."""
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(issue_number)
+        issue.edit(state="open")
+        return self._issue_to_dict(issue)
+
+    def comment_on_issue(
+        self,
+        issue_number: int,
+        body: str,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Add a comment to a GitHub issue."""
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(issue_number)
+        comment = issue.create_comment(body)
+        return {
+            "id": comment.id,
+            "body": comment.body,
+            "html_url": comment.html_url,
+            "created_at": comment.created_at.isoformat(),
+            "issue_number": issue_number,
+        }
+
+    # ========================================================================
     # Search Operations (for Appraisals)
     # ========================================================================
 
