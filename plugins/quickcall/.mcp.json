@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "quickcall": {
-      "command": "uvx",
-      "args": ["quickcall-integrations"]
+      "command": "sh",
+      "args": ["-c", "uv cache clean quickcall-integrations >/dev/null 2>&1; uvx quickcall-integrations@latest"]
     }
   }
 }
