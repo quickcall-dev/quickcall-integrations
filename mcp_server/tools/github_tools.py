@@ -570,7 +570,7 @@ def create_github_tools(mcp: FastMCP) -> None:
     def manage_issues(
         action: str = Field(
             ...,
-            description="Action: 'view', 'create', 'update', 'close', 'reopen', 'comment', "
+            description="Action: 'list', 'view', 'create', 'update', 'close', 'reopen', 'comment', "
             "'add_sub_issue', 'remove_sub_issue', 'list_sub_issues'",
         ),
         issue_numbers: Optional[List[int]] = Field(
@@ -610,13 +610,35 @@ def create_github_tools(mcp: FastMCP) -> None:
             default=None,
             description="Repository name. Required.",
         ),
+        state: Optional[str] = Field(
+            default="open",
+            description="Issue state filter for 'list': 'open', 'closed', or 'all' (default: 'open')",
+        ),
+        creator: Optional[str] = Field(
+            default=None,
+            description="Filter by issue creator username (for 'list')",
+        ),
+        milestone: Optional[str] = Field(
+            default=None,
+            description="Filter by milestone: number, title, '*' (any), or 'none' (for 'list')",
+        ),
+        sort: Optional[str] = Field(
+            default="updated",
+            description="Sort by: 'created', 'updated', or 'comments' (for 'list', default: 'updated')",
+        ),
+        limit: Optional[int] = Field(
+            default=30,
+            description="Maximum issues to return for 'list' action (default: 30)",
+        ),
     ) -> dict:
         """
-        Manage GitHub issues: view, create, update, close, reopen, comment, and sub-issues.
+        Manage GitHub issues: list, view, create, update, close, reopen, comment, and sub-issues.
 
         Supports bulk operations for view/close/reopen/comment via issue_numbers list.
 
         Examples:
+        - list: manage_issues(action="list", state="open", milestone="v1.0")
+        - list by creator: manage_issues(action="list", creator="username")
         - view: manage_issues(action="view", issue_numbers=[42])
         - create: manage_issues(action="create", title="Bug", template="bug_report")
         - create as sub-issue: manage_issues(action="create", title="Task 1", parent_issue=42)
@@ -628,6 +650,26 @@ def create_github_tools(mcp: FastMCP) -> None:
         """
         try:
             client = _get_client()
+
+            # === LIST ACTION ===
+            if action == "list":
+                issues = client.list_issues(
+                    owner=owner,
+                    repo=repo,
+                    state=state or "open",
+                    labels=labels,
+                    assignee=assignees[0] if assignees else None,
+                    creator=creator,
+                    milestone=milestone,
+                    sort=sort or "updated",
+                    limit=limit or 30,
+                )
+                return {
+                    "action": "list",
+                    "state": state or "open",
+                    "count": len(issues),
+                    "issues": issues,
+                }
 
             # === CREATE ACTION ===
             if action == "create":

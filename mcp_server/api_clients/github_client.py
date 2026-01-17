@@ -582,8 +582,16 @@ class GitHubClient:
     # Issue Operations
     # ========================================================================
 
-    def _issue_to_dict(self, issue) -> Dict[str, Any]:
+    def _issue_to_dict(self, issue, summary: bool = False) -> Dict[str, Any]:
         """Convert PyGithub Issue to dict."""
+        if summary:
+            return {
+                "number": issue.number,
+                "title": issue.title,
+                "state": issue.state,
+                "labels": [label.name for label in issue.labels],
+                "html_url": issue.html_url,
+            }
         return {
             "number": issue.number,
             "title": issue.title,
@@ -594,6 +602,70 @@ class GitHubClient:
             "assignees": [a.login for a in issue.assignees],
             "created_at": issue.created_at.isoformat(),
         }
+
+    def list_issues(
+        self,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+        state: str = "open",
+        labels: Optional[List[str]] = None,
+        assignee: Optional[str] = None,
+        creator: Optional[str] = None,
+        milestone: Optional[str] = None,
+        sort: str = "updated",
+        limit: int = 30,
+    ) -> List[Dict[str, Any]]:
+        """
+        List issues in a repository.
+
+        Args:
+            owner: Repository owner
+            repo: Repository name
+            state: Issue state: 'open', 'closed', or 'all'
+            labels: Filter by labels
+            assignee: Filter by assignee username
+            creator: Filter by issue creator username
+            milestone: Filter by milestone (number, title, or '*' for any, 'none' for no milestone)
+            sort: Sort by 'created', 'updated', or 'comments'
+            limit: Maximum issues to return
+
+        Returns:
+            List of issue summaries
+        """
+        gh_repo = self._get_repo(owner, repo)
+
+        kwargs = {"state": state, "sort": sort, "direction": "desc"}
+        if labels:
+            kwargs["labels"] = labels
+        if assignee:
+            kwargs["assignee"] = assignee
+        if creator:
+            kwargs["creator"] = creator
+        if milestone:
+            # Handle milestone - can be number, '*', 'none', or title
+            if milestone == "*" or milestone == "none":
+                kwargs["milestone"] = milestone
+            elif milestone.isdigit():
+                kwargs["milestone"] = gh_repo.get_milestone(int(milestone))
+            else:
+                # Search by title
+                for ms in gh_repo.get_milestones(state="all"):
+                    if ms.title.lower() == milestone.lower():
+                        kwargs["milestone"] = ms
+                        break
+
+        issues = []
+        count = 0
+        for issue in gh_repo.get_issues(**kwargs):
+            # Skip pull requests (GitHub API returns PRs in issues endpoint)
+            if issue.pull_request is not None:
+                continue
+            issues.append(self._issue_to_dict(issue, summary=True))
+            count += 1
+            if count >= limit:
+                break
+
+        return issues
 
     def create_issue(
         self,
