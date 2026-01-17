@@ -686,6 +686,232 @@ class GitHubClient:
             "issue_number": issue_number,
         }
 
+    def get_issue(
+        self,
+        issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+        include_sub_issues: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        Get detailed information about a GitHub issue.
+
+        Args:
+            issue_number: Issue number
+            owner: Repository owner
+            repo: Repository name
+            include_sub_issues: Whether to fetch sub-issues list
+
+        Returns:
+            Issue details including sub-issues if requested
+        """
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(issue_number)
+
+        result = {
+            "number": issue.number,
+            "id": issue.id,  # Internal ID needed for sub-issues API
+            "title": issue.title,
+            "body": issue.body,
+            "state": issue.state,
+            "html_url": issue.html_url,
+            "labels": [label.name for label in issue.labels],
+            "assignees": [a.login for a in issue.assignees],
+            "created_at": issue.created_at.isoformat(),
+            "updated_at": issue.updated_at.isoformat() if issue.updated_at else None,
+            "closed_at": issue.closed_at.isoformat() if issue.closed_at else None,
+            "comments_count": issue.comments,
+            "author": issue.user.login if issue.user else "unknown",
+        }
+
+        # Fetch sub-issues if requested
+        if include_sub_issues:
+            owner = owner or self.default_owner
+            repo_name = repo or self.default_repo
+            sub_issues = self.list_sub_issues(issue_number, owner=owner, repo=repo_name)
+            result["sub_issues"] = sub_issues
+            result["sub_issues_count"] = len(sub_issues)
+
+        return result
+
+    # ========================================================================
+    # Sub-Issue Operations (GitHub's native sub-issues feature)
+    # ========================================================================
+
+    def list_sub_issues(
+        self,
+        parent_issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        List sub-issues of a parent issue.
+
+        Args:
+            parent_issue_number: Parent issue number
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            List of sub-issue summaries
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        try:
+            with httpx.Client() as client:
+                response = client.get(
+                    f"https://api.github.com/repos/{owner}/{repo}/issues/{parent_issue_number}/sub_issues",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+                data = response.json()
+
+            return [
+                {
+                    "number": item["number"],
+                    "id": item["id"],
+                    "title": item["title"],
+                    "state": item["state"],
+                    "html_url": item["html_url"],
+                }
+                for item in data
+            ]
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                # No sub-issues or feature not enabled
+                return []
+            logger.error(f"Failed to list sub-issues: HTTP {e.response.status_code}")
+            raise GithubException(e.response.status_code, e.response.json())
+        except Exception as e:
+            logger.error(f"Failed to list sub-issues: {e}")
+            return []
+
+    def add_sub_issue(
+        self,
+        parent_issue_number: int,
+        child_issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add an existing issue as a sub-issue to a parent.
+
+        Args:
+            parent_issue_number: Parent issue number
+            child_issue_number: Child issue number to add as sub-issue
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Result with parent and child info
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        # First, get the child issue's internal ID (required by API)
+        gh_repo = self._get_repo(owner, repo)
+        child_issue = gh_repo.get_issue(child_issue_number)
+        child_id = child_issue.id
+
+        try:
+            with httpx.Client() as client:
+                response = client.post(
+                    f"https://api.github.com/repos/{owner}/{repo}/issues/{parent_issue_number}/sub_issues",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    json={"sub_issue_id": child_id},
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+
+            return {
+                "success": True,
+                "parent_issue": parent_issue_number,
+                "child_issue": child_issue_number,
+                "child_id": child_id,
+            }
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to add sub-issue: HTTP {e.response.status_code}")
+            error_data = e.response.json() if e.response.content else {}
+            raise GithubException(
+                e.response.status_code,
+                error_data,
+                message=f"Failed to add #{child_issue_number} as sub-issue of #{parent_issue_number}",
+            )
+
+    def remove_sub_issue(
+        self,
+        parent_issue_number: int,
+        child_issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Remove a sub-issue from a parent.
+
+        Args:
+            parent_issue_number: Parent issue number
+            child_issue_number: Child issue number to remove
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Result with parent and child info
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        # Get the child issue's internal ID
+        gh_repo = self._get_repo(owner, repo)
+        child_issue = gh_repo.get_issue(child_issue_number)
+        child_id = child_issue.id
+
+        try:
+            with httpx.Client() as client:
+                response = client.delete(
+                    f"https://api.github.com/repos/{owner}/{repo}/issues/{parent_issue_number}/sub_issues/{child_id}",
+                    headers={
+                        "Authorization": f"Bearer {self.token}",
+                        "Accept": "application/vnd.github+json",
+                        "X-GitHub-Api-Version": "2022-11-28",
+                    },
+                    timeout=30.0,
+                )
+                response.raise_for_status()
+
+            return {
+                "success": True,
+                "parent_issue": parent_issue_number,
+                "child_issue": child_issue_number,
+                "removed": True,
+            }
+        except httpx.HTTPStatusError as e:
+            logger.error(f"Failed to remove sub-issue: HTTP {e.response.status_code}")
+            error_data = e.response.json() if e.response.content else {}
+            raise GithubException(
+                e.response.status_code,
+                error_data,
+                message=f"Failed to remove #{child_issue_number} from #{parent_issue_number}",
+            )
+
     # ========================================================================
     # Search Operations (for Appraisals)
     # ========================================================================

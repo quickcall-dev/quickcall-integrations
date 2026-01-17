@@ -570,11 +570,12 @@ def create_github_tools(mcp: FastMCP) -> None:
     def manage_issues(
         action: str = Field(
             ...,
-            description="Action: 'create', 'update', 'close', 'reopen', or 'comment'",
+            description="Action: 'view', 'create', 'update', 'close', 'reopen', 'comment', "
+            "'add_sub_issue', 'remove_sub_issue', 'list_sub_issues'",
         ),
         issue_numbers: Optional[List[int]] = Field(
             default=None,
-            description="Issue number(s). Required for update/close/reopen/comment. Supports bulk operations.",
+            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue ops.",
         ),
         title: Optional[str] = Field(
             default=None,
@@ -594,7 +595,12 @@ def create_github_tools(mcp: FastMCP) -> None:
         ),
         template: Optional[str] = Field(
             default=None,
-            description="Template name for 'create' (e.g., 'bug', 'feature')",
+            description="Template name for 'create' (e.g., 'bug_report', 'feature_request')",
+        ),
+        parent_issue: Optional[int] = Field(
+            default=None,
+            description="Parent issue number. For 'create': attach new issue as sub-issue. "
+            "For 'add_sub_issue'/'remove_sub_issue'/'list_sub_issues': the parent issue.",
         ),
         owner: Optional[str] = Field(
             default=None,
@@ -606,18 +612,24 @@ def create_github_tools(mcp: FastMCP) -> None:
         ),
     ) -> dict:
         """
-        Manage GitHub issues: create, update, close, reopen, or comment.
+        Manage GitHub issues: view, create, update, close, reopen, comment, and sub-issues.
 
-        Supports bulk operations for close/reopen/comment via issue_numbers list.
+        Supports bulk operations for view/close/reopen/comment via issue_numbers list.
 
         Examples:
-        - create: manage_issues(action="create", title="Bug", template="bug")
+        - view: manage_issues(action="view", issue_numbers=[42])
+        - create: manage_issues(action="create", title="Bug", template="bug_report")
+        - create as sub-issue: manage_issues(action="create", title="Task 1", parent_issue=42)
         - close multiple: manage_issues(action="close", issue_numbers=[1, 2, 3])
         - comment: manage_issues(action="comment", issue_numbers=[42], body="Fixed!")
+        - add sub-issues: manage_issues(action="add_sub_issue", issue_numbers=[43,44], parent_issue=42)
+        - remove sub-issue: manage_issues(action="remove_sub_issue", issue_numbers=[43], parent_issue=42)
+        - list sub-issues: manage_issues(action="list_sub_issues", parent_issue=42)
         """
         try:
             client = _get_client()
 
+            # === CREATE ACTION ===
             if action == "create":
                 if not title:
                     raise ToolError("'title' is required for 'create' action")
@@ -625,24 +637,79 @@ def create_github_tools(mcp: FastMCP) -> None:
                 tpl = _load_issue_template(template)
                 final_body = body if body is not None else tpl.get("body", "")
                 final_labels = labels if labels is not None else tpl.get("labels", [])
+                final_assignees = (
+                    assignees if assignees is not None else tpl.get("assignees", [])
+                )
+
+                # Apply title prefix from template if present
+                title_prefix = tpl.get("title_prefix", "")
+                if title_prefix and not title.startswith(title_prefix):
+                    title = f"{title_prefix}{title}"
 
                 issue = client.create_issue(
                     title=title,
                     body=final_body,
                     labels=final_labels,
-                    assignees=assignees,
+                    assignees=final_assignees,
                     owner=owner,
                     repo=repo,
                 )
-                return {"action": "created", "issue": issue}
 
-            # All other actions require issue_numbers
+                result = {"action": "created", "issue": issue}
+
+                # If parent_issue specified, add as sub-issue
+                if parent_issue:
+                    try:
+                        sub_result = client.add_sub_issue(
+                            parent_issue_number=parent_issue,
+                            child_issue_number=issue["number"],
+                            owner=owner,
+                            repo=repo,
+                        )
+                        result["sub_issue_of"] = parent_issue
+                        result["sub_issue_linked"] = sub_result.get("success", False)
+                    except Exception as e:
+                        result["sub_issue_error"] = str(e)
+
+                return result
+
+            # === LIST SUB-ISSUES ACTION ===
+            if action == "list_sub_issues":
+                if not parent_issue:
+                    raise ToolError(
+                        "'parent_issue' is required for 'list_sub_issues' action"
+                    )
+
+                sub_issues = client.list_sub_issues(
+                    parent_issue_number=parent_issue,
+                    owner=owner,
+                    repo=repo,
+                )
+                return {
+                    "action": "list_sub_issues",
+                    "parent_issue": parent_issue,
+                    "count": len(sub_issues),
+                    "sub_issues": sub_issues,
+                }
+
+            # === ALL OTHER ACTIONS REQUIRE issue_numbers ===
             if not issue_numbers:
                 raise ToolError(f"'issue_numbers' required for '{action}' action")
 
             results = []
             for issue_number in issue_numbers:
-                if action == "update":
+                # === VIEW ACTION ===
+                if action == "view":
+                    issue_data = client.get_issue(
+                        issue_number=issue_number,
+                        owner=owner,
+                        repo=repo,
+                        include_sub_issues=True,
+                    )
+                    results.append(issue_data)
+
+                # === UPDATE ACTION ===
+                elif action == "update":
                     client.update_issue(
                         issue_number=issue_number,
                         title=title,
@@ -654,14 +721,17 @@ def create_github_tools(mcp: FastMCP) -> None:
                     )
                     results.append({"number": issue_number, "status": "updated"})
 
+                # === CLOSE ACTION ===
                 elif action == "close":
                     client.close_issue(issue_number, owner=owner, repo=repo)
                     results.append({"number": issue_number, "status": "closed"})
 
+                # === REOPEN ACTION ===
                 elif action == "reopen":
                     client.reopen_issue(issue_number, owner=owner, repo=repo)
                     results.append({"number": issue_number, "status": "reopened"})
 
+                # === COMMENT ACTION ===
                 elif action == "comment":
                     if not body:
                         raise ToolError("'body' is required for 'comment' action")
@@ -676,8 +746,56 @@ def create_github_tools(mcp: FastMCP) -> None:
                         }
                     )
 
+                # === ADD SUB-ISSUE ACTION ===
+                elif action == "add_sub_issue":
+                    if not parent_issue:
+                        raise ToolError(
+                            "'parent_issue' is required for 'add_sub_issue' action"
+                        )
+                    sub_result = client.add_sub_issue(
+                        parent_issue_number=parent_issue,
+                        child_issue_number=issue_number,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "status": "added_as_sub_issue",
+                            "parent_issue": parent_issue,
+                        }
+                    )
+
+                # === REMOVE SUB-ISSUE ACTION ===
+                elif action == "remove_sub_issue":
+                    if not parent_issue:
+                        raise ToolError(
+                            "'parent_issue' is required for 'remove_sub_issue' action"
+                        )
+                    client.remove_sub_issue(
+                        parent_issue_number=parent_issue,
+                        child_issue_number=issue_number,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "status": "removed_from_parent",
+                            "parent_issue": parent_issue,
+                        }
+                    )
+
                 else:
                     raise ToolError(f"Invalid action: {action}")
+
+            # Return format depends on action
+            if action == "view":
+                return {
+                    "action": "view",
+                    "count": len(results),
+                    "issues": results,
+                }
 
             return {"action": action, "count": len(results), "results": results}
 
