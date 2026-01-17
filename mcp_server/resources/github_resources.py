@@ -5,48 +5,12 @@ Resources are automatically available in Claude's context when connected.
 """
 
 import logging
-from typing import Any, Dict, Optional
 
-import yaml
 from fastmcp import FastMCP
 
 from mcp_server.auth import get_credential_store, get_github_pat
-from mcp_server.auth.credentials import _find_project_root, _parse_env_file
 
 logger = logging.getLogger(__name__)
-
-
-def _load_issue_templates_config() -> Optional[Dict[str, Any]]:
-    """
-    Load issue templates from ISSUE_TEMPLATE_PATH in .quickcall.env.
-    Returns None if not configured or file doesn't exist.
-    """
-    import os
-    from pathlib import Path
-
-    template_path = os.getenv("ISSUE_TEMPLATE_PATH")
-
-    # Check .quickcall.env in project root
-    if not template_path:
-        project_root = _find_project_root()
-        if project_root:
-            config_path = project_root / ".quickcall.env"
-            if config_path.exists():
-                env_vars = _parse_env_file(config_path)
-                if "ISSUE_TEMPLATE_PATH" in env_vars:
-                    template_path = env_vars["ISSUE_TEMPLATE_PATH"]
-                    if not Path(template_path).is_absolute():
-                        template_path = str(project_root / template_path)
-
-    if not template_path:
-        return None
-
-    try:
-        with open(template_path) as f:
-            return yaml.safe_load(f) or {}
-    except Exception as e:
-        logger.warning(f"Failed to load issue templates: {e}")
-        return None
 
 
 def create_github_resources(mcp: FastMCP) -> None:
@@ -107,41 +71,46 @@ def create_github_resources(mcp: FastMCP) -> None:
         """
         Available issue templates from project configuration.
 
+        Supports both:
+        - GitHub native templates (.github/ISSUE_TEMPLATE/*.yml)
+        - Custom templates (ISSUE_TEMPLATE_PATH in .quickcall.env)
+
         Use template names when creating issues with manage_issues.
         """
-        config = _load_issue_templates_config()
+        # Import here to avoid circular imports
+        from mcp_server.tools.github_tools import _get_all_templates
 
-        if not config:
-            return "No issue templates configured.\n\nTo configure:\n1. Create a YAML file with your templates\n2. Add ISSUE_TEMPLATE_PATH=/path/to/templates.yaml to .quickcall.env"
-
-        templates = config.get("templates", {})
-        defaults = config.get("defaults", {})
+        templates = _get_all_templates()
 
         if not templates:
-            lines = ["Issue Templates:", ""]
-            if defaults:
-                labels = defaults.get("labels", [])
-                lines.append("Default template:")
-                if labels:
-                    lines.append(f"  Labels: {', '.join(labels)}")
-                if defaults.get("body"):
-                    lines.append(f"  Body template: {defaults['body'][:100]}...")
-            return "\n".join(lines)
+            return (
+                "No issue templates found.\n\n"
+                "Supported sources:\n"
+                "1. GitHub native: .github/ISSUE_TEMPLATE/*.yml\n"
+                "2. Custom: Add ISSUE_TEMPLATE_PATH to .quickcall.env"
+            )
 
         lines = ["Available Issue Templates:", ""]
 
-        for name, template in templates.items():
+        for key, template in templates.items():
+            name = template.get("name", key)
+            description = template.get("description", "")
             labels = template.get("labels", [])
-            body_preview = template.get("body", "")[:80]
-            lines.append(f"- {name}")
+            title_prefix = template.get("title_prefix", "")
+
+            lines.append(f"- {key}")
+            if name != key:
+                lines.append(f"    Name: {name}")
+            if description:
+                lines.append(f"    Description: {description}")
             if labels:
                 lines.append(f"    Labels: {', '.join(labels)}")
-            if body_preview:
-                lines.append(f"    Body: {body_preview}...")
+            if title_prefix:
+                lines.append(f"    Title prefix: {title_prefix}")
 
         lines.append("")
         lines.append(
-            "Usage: manage_issues(action='create', title='...', template='<name>')"
+            "Usage: manage_issues(action='create', title='...', template='<key>')"
         )
 
         return "\n".join(lines)

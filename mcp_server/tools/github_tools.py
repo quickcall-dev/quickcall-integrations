@@ -44,14 +44,85 @@ DEFAULT_ISSUE_TEMPLATE: Dict[str, Any] = {
 }
 
 
-def _load_issue_template(template_type: Optional[str] = None) -> Dict[str, Any]:
+def _load_github_native_templates() -> Dict[str, Dict[str, Any]]:
     """
-    Load issue template from ISSUE_TEMPLATE_PATH in .quickcall.env.
-    Returns defaults if not configured.
+    Load GitHub native issue templates from .github/ISSUE_TEMPLATE/*.yml.
+    Returns dict of template_name -> template_config.
     """
-    template_path = os.getenv("ISSUE_TEMPLATE_PATH")
+    project_root = _find_project_root()
+    if not project_root:
+        return {}
 
-    # Check .quickcall.env in project root
+    template_dir = project_root / ".github" / "ISSUE_TEMPLATE"
+    if not template_dir.exists():
+        return {}
+
+    templates = {}
+    for template_file in template_dir.glob("*.yml"):
+        try:
+            with open(template_file) as f:
+                config = yaml.safe_load(f) or {}
+
+            # Extract template name (use filename without extension as fallback)
+            name = config.get("name", template_file.stem)
+            # Use filename stem as key for easier matching
+            key = template_file.stem
+
+            # Convert GitHub template format to our format
+            templates[key] = {
+                "name": name,
+                "description": config.get("description", ""),
+                "title_prefix": config.get("title", ""),
+                "labels": config.get("labels", []),
+                "assignees": config.get("assignees", []),
+                "body": _github_template_body_to_markdown(config.get("body", [])),
+            }
+        except Exception as e:
+            logger.warning(f"Failed to load GitHub template {template_file}: {e}")
+
+    return templates
+
+
+def _github_template_body_to_markdown(body: List[Dict[str, Any]]) -> str:
+    """Convert GitHub issue template body fields to markdown."""
+    if not body:
+        return ""
+
+    lines = []
+    for field in body:
+        field_type = field.get("type", "")
+        attrs = field.get("attributes", {})
+        label = attrs.get("label", "")
+
+        if field_type in ("textarea", "input"):
+            if label:
+                lines.append(f"## {label}")
+                lines.append("")
+            placeholder = attrs.get("placeholder", "")
+            if placeholder:
+                lines.append(placeholder)
+                lines.append("")
+        elif field_type == "markdown":
+            value = attrs.get("value", "")
+            if value:
+                lines.append(value)
+                lines.append("")
+
+    return "\n".join(lines)
+
+
+def _get_all_templates() -> Dict[str, Dict[str, Any]]:
+    """
+    Get all available issue templates from both sources.
+    Priority: Custom templates (.quickcall.env) > GitHub native templates
+    """
+    templates = {}
+
+    # 1. Load GitHub native templates first (lower priority)
+    templates.update(_load_github_native_templates())
+
+    # 2. Load custom templates (higher priority, can override)
+    template_path = os.getenv("ISSUE_TEMPLATE_PATH")
     if not template_path:
         project_root = _find_project_root()
         if project_root:
@@ -63,23 +134,51 @@ def _load_issue_template(template_type: Optional[str] = None) -> Dict[str, Any]:
                     if not Path(template_path).is_absolute():
                         template_path = str(project_root / template_path)
 
-    if not template_path:
+    if template_path:
+        try:
+            with open(template_path) as f:
+                config = yaml.safe_load(f) or {}
+            custom_templates = config.get("templates", {})
+            for key, tpl in custom_templates.items():
+                templates[key] = {
+                    "name": key,
+                    "description": "",
+                    "title_prefix": "",
+                    "labels": tpl.get("labels", []),
+                    "assignees": tpl.get("assignees", []),
+                    "body": tpl.get("body", ""),
+                }
+        except Exception as e:
+            logger.warning(f"Failed to load custom templates: {e}")
+
+    return templates
+
+
+def _load_issue_template(template_type: Optional[str] = None) -> Dict[str, Any]:
+    """
+    Load issue template from available sources.
+
+    Sources (in priority order):
+    1. Custom templates from ISSUE_TEMPLATE_PATH in .quickcall.env
+    2. GitHub native templates from .github/ISSUE_TEMPLATE/*.yml
+
+    Returns defaults if no template found.
+    """
+    if not template_type:
         return DEFAULT_ISSUE_TEMPLATE
 
-    try:
-        with open(template_path) as f:
-            config = yaml.safe_load(f) or {}
+    all_templates = _get_all_templates()
 
-        # If template_type specified, look for it in templates section
-        if template_type and "templates" in config:
-            return config["templates"].get(
-                template_type, config.get("defaults", DEFAULT_ISSUE_TEMPLATE)
-            )
+    if template_type in all_templates:
+        tpl = all_templates[template_type]
+        return {
+            "labels": tpl.get("labels", []),
+            "assignees": tpl.get("assignees", []),
+            "body": tpl.get("body", ""),
+            "title_prefix": tpl.get("title_prefix", ""),
+        }
 
-        return config.get("defaults", DEFAULT_ISSUE_TEMPLATE)
-    except Exception as e:
-        logger.warning(f"Failed to load issue template: {e}")
-        return DEFAULT_ISSUE_TEMPLATE
+    return DEFAULT_ISSUE_TEMPLATE
 
 
 # Track whether we're using PAT mode for status reporting

@@ -1,0 +1,38 @@
+defaults:
+  labels: ["triage"]
+  body: |
+    ## Description
+
+    ## Details
+
+templates:
+  bug:
+    labels: ["bug", "triage"]
+    body: |
+      ## Bug Description
+
+      ## Steps to Reproduce
+      1.
+      2.
+
+      ## Expected Behavior
+
+      ## Actual Behavior
+
+  feature:
+    labels: ["enhancement"]
+    body: |
+      ## Feature Request
+
+      ## Problem Statement
+
+      ## Proposed Solution
+
+      ## Alternatives Considered
+
+  docs:
+    labels: ["documentation"]
+    body: |
+      ## Documentation Update
+
+      ## What needs to be documented?
