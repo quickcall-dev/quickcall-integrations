@@ -77,7 +77,7 @@ Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 | **Slack** | Read/send messages, threads, channels | Yes |
 
 <details>
-<summary><strong>Available Tools (23)</strong></summary>
+<summary><strong>Available Tools (24)</strong></summary>
 
 ### Git
 | Tool | Description |
@@ -89,10 +89,11 @@ Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 |------|-------------|
 | `list_repos` | List accessible repositories |
 | `list_prs` | List pull requests (open/closed/all) |
-| `get_pr` | Get PR details (title, description, files changed) |
+| `get_prs` | Get PR details (title, description, files changed) |
 | `list_commits` | List commits with optional filters |
 | `get_commit` | Get commit details (message, stats, files) |
 | `list_branches` | List repository branches |
+| `manage_issues` | List, view, create, update, close, reopen, comment on issues + sub-issues |
 | `check_github_connection` | Verify GitHub connection |
 
 ### Slack
@@ -160,8 +161,19 @@ GITHUB_USERNAME=your-username  # Optional: for better UX
 **Create a PAT at:** https://github.com/settings/tokens
 
 **Required scopes:**
-- `repo` - Full access to private repositories
-- `public_repo` - Access to public repositories only (if you don't need private repos)
+
+| Scope | Description |
+|-------|-------------|
+| `repo` | Full access to private repositories (includes all below) |
+| `public_repo` | Access to public repositories only |
+
+**Recommended scopes for full functionality:**
+
+| Scope | Used For |
+|-------|----------|
+| `repo` | PRs, commits, branches, issues (private repos) |
+| `read:org` | List organization repos |
+| `workflow` | Trigger workflow runs (optional) |
 
 **Note:** PAT mode provides access to GitHub tools only. For Slack integration, use QuickCall authentication.
 
@@ -213,6 +225,100 @@ List channels I have access to
 ```
 List open PRs on [repo] and send titles to #updates channel
 What did I work on this week? Send summary to #standup
+```
+
+## Issue Management
+
+The `manage_issues` tool provides full issue lifecycle management:
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `list` | List issues with filters |
+| `view` | View issue details |
+| `create` | Create new issue (with optional template) |
+| `update` | Update issue title/body/labels |
+| `close` | Close issue(s) |
+| `reopen` | Reopen issue(s) |
+| `comment` | Add comment to issue(s) |
+| `add_sub_issue` | Add child issue to parent |
+| `remove_sub_issue` | Remove child from parent |
+| `list_sub_issues` | List sub-issues of a parent |
+
+### List Filters
+
+| Filter | Description |
+|--------|-------------|
+| `state` | `'open'`, `'closed'`, or `'all'` (default: `'open'`) |
+| `labels` | Filter by one or more labels |
+| `assignees` | Filter by assignee |
+| `creator` | Filter by issue creator username |
+| `milestone` | Filter by milestone: number, title, `'*'` (any), or `'none'` |
+| `sort` | Sort by: `'created'`, `'updated'`, or `'comments'` (default: `'updated'`) |
+| `limit` | Max issues to return (default: 30) |
+
+**Examples:**
+```
+List open issues in milestone v1.0
+List issues created by sagar
+Show closed bugs sorted by comments
+List issues without a milestone
+```
+
+### Issue Templates
+
+QuickCall supports issue templates from two sources:
+
+**1. GitHub Native Templates** (`.github/ISSUE_TEMPLATE/*.yml`)
+
+Standard GitHub issue templates are automatically detected:
+```yaml
+# .github/ISSUE_TEMPLATE/bug_report.yml
+name: Bug Report
+description: Report a bug
+labels: [bug]
+body:
+  - type: textarea
+    attributes:
+      label: Description
+```
+
+**2. Custom Templates** (`.quickcall.env`)
+
+Define custom templates in your project config:
+```bash
+# .quickcall.env
+ISSUE_TEMPLATE_PATH=/path/to/templates.yml
+```
+
+```yaml
+# templates.yml
+bug_report:
+  name: Bug Report
+  description: Report a bug
+  labels: [bug]
+  title_prefix: "[BUG] "
+  body: |
+    ## Description
+
+    ## Steps to Reproduce
+
+    ## Expected Behavior
+
+feature_request:
+  name: Feature Request
+  labels: [enhancement]
+  body: |
+    ## Problem
+
+    ## Proposed Solution
+```
+
+**Usage:**
+```
+Create a bug report issue titled "Login fails on Safari"
+Create issue with feature_request template
 ```
 
 ## Troubleshooting
