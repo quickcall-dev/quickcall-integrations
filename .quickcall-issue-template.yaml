@@ -6,34 +6,18 @@ defaults:
     ## Details
 
 templates:
-  bug:
-    labels: ["bug", "triage"]
-    body: |
-      ## Bug Description
-
-      ## Steps to Reproduce
-      1.
-      2.
-
-      ## Expected Behavior
-
-      ## Actual Behavior
-
-  feature:
-    labels: ["enhancement"]
-    body: |
-      ## Feature Request
-
-      ## Problem Statement
-
-      ## Proposed Solution
-
-      ## Alternatives Considered
-
   docs:
     labels: ["documentation"]
-    title_prefix: "[QuickCall Custom] "
+    title_prefix: "[Docs QC] "
     body: |
       ## Documentation Update
 
       ## What needs to be documented?
+
+  chore:
+    labels: ["chore"]
+    title_prefix: "[Chore QC] "
+    body: |
+      ## Task
+
+      ## Why is this needed?
