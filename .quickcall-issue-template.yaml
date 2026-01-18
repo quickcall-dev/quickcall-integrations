@@ -32,6 +32,7 @@ templates:
 
   docs:
     labels: ["documentation"]
+    title_prefix: "[QuickCall Custom] "
     body: |
       ## Documentation Update
 
