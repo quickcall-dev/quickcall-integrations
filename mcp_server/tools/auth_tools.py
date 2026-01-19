@@ -10,7 +10,7 @@ Also provides GitHub PAT authentication for users who can't install the GitHub A
 import os
 import logging
 import webbrowser
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 import httpx
 from github import Github, Auth, GithubException
@@ -20,6 +20,7 @@ from pydantic import Field
 from mcp_server.auth import (
     get_credential_store,
     DeviceFlowAuth,
+    get_github_pat,
 )
 
 logger = logging.getLogger(__name__)
@@ -532,9 +533,10 @@ def create_auth_tools(mcp: FastMCP):
 
     @mcp.tool(tags={"auth", "github"})
     def connect_github_via_pat(
-        token: str = Field(
-            ...,
-            description="GitHub Personal Access Token (ghp_xxx or github_pat_xxx)",
+        token: Optional[str] = Field(
+            default=None,
+            description="GitHub Personal Access Token (ghp_xxx or github_pat_xxx). "
+            "If not provided, auto-detects from .quickcall.env or GITHUB_TOKEN env var.",
         ),
     ) -> Dict[str, Any]:
         """
@@ -543,17 +545,13 @@ def create_auth_tools(mcp: FastMCP):
         Use this if your organization can't install the QuickCall GitHub App.
         This is an alternative to the standard connect_github flow.
 
-        This command:
-        1. Validates your PAT by calling GitHub API
-        2. Auto-detects your GitHub username
-        3. Stores the PAT securely in ~/.quickcall/credentials.json
-
-        After connecting, you can use GitHub tools like list_repos, list_prs, etc.
+        Token auto-detection locations (in order):
+        1. GITHUB_TOKEN or GITHUB_PAT environment variable
+        2. .quickcall.env in your project root (where .git is)
+        3. ~/.quickcall.env in your home directory
 
         Create a PAT at: https://github.com/settings/tokens
-        Required scopes:
-        - repo (full access to private repos)
-        - OR public_repo (public repos only)
+        Required scopes (classic PAT): project, read:user, repo
 
         Note: PAT mode works independently of QuickCall. You don't need
         to run connect_quickcall first. However, Slack tools still require
@@ -571,11 +569,29 @@ def create_auth_tools(mcp: FastMCP):
                 "hint": "Use disconnect_github_pat to remove it, then connect again with a new token.",
             }
 
+        # Auto-detect token if not provided
+        token_source = "provided directly"
+        if not token:
+            token, token_source = get_github_pat()
+            if not token:
+                return {
+                    "status": "error",
+                    "message": "No token provided and none found automatically.",
+                    "searched_locations": [
+                        "GITHUB_TOKEN / GITHUB_PAT environment variables",
+                        ".quickcall.env in project root (where .git is located)",
+                        "~/.quickcall.env in home directory",
+                    ],
+                    "hint": "Either provide the token directly, set GITHUB_TOKEN env var, "
+                    "or create .quickcall.env with GITHUB_TOKEN=ghp_xxx",
+                }
+
         # Validate token format
         if not token.startswith(("ghp_", "github_pat_")):
             return {
                 "status": "error",
                 "message": "Invalid token format. GitHub PATs start with 'ghp_' or 'github_pat_'",
+                "token_source": token_source,
                 "hint": "Create a new token at https://github.com/settings/tokens",
             }
 
@@ -619,6 +635,7 @@ def create_auth_tools(mcp: FastMCP):
             "message": f"Successfully connected GitHub as {username}!",
             "username": username,
             "mode": "pat",
+            "token_source": token_source,
             "hint": "You can now use GitHub tools. Run check_github_connection to verify.",
         }
 

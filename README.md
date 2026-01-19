@@ -160,20 +160,13 @@ GITHUB_USERNAME=your-username  # Optional: for better UX
 
 **Create a PAT at:** https://github.com/settings/tokens
 
-**Required scopes:**
-
-| Scope | Description |
-|-------|-------------|
-| `repo` | Full access to private repositories (includes all below) |
-| `public_repo` | Access to public repositories only |
-
-**Recommended scopes for full functionality:**
+**Required scopes (classic PAT):**
 
 | Scope | Used For |
 |-------|----------|
-| `repo` | PRs, commits, branches, issues (private repos) |
-| `read:org` | List organization repos |
-| `workflow` | Trigger workflow runs (optional) |
+| `project` | GitHub Projects access |
+| `read:user` | Read user profile data |
+| `repo` | PRs, commits, branches, issues |
 
 **Note:** PAT mode provides access to GitHub tools only. For Slack integration, use QuickCall authentication.
 

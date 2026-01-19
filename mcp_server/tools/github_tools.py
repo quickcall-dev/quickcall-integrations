@@ -270,7 +270,7 @@ def _get_client() -> GitHubClient:
             "2. Run connect_quickcall to use QuickCall (GitHub App + Slack)\n"
             "3. Set GITHUB_TOKEN environment variable\n\n"
             "For PAT: Create token at https://github.com/settings/tokens\n"
-            "Required scopes: repo (private) or public_repo (public only)"
+            "Required scopes (classic PAT): project, read:user, repo"
         )
 
 

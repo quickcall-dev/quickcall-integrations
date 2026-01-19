@@ -8,31 +8,25 @@ Use this if your organization can't install the QuickCall GitHub App.
 
 ## Steps
 
-1. **Check if PAT already configured:**
-   - Call `check_quickcall_status`
-   - If `github_pat.configured` is true, inform user and ask if they want to reconnect
+1. **Call `connect_github_via_pat` (no arguments needed):**
+   - The tool auto-detects tokens from these locations (in order):
+     1. `GITHUB_TOKEN` or `GITHUB_PAT` environment variable
+     2. `.quickcall.env` in project root (where `.git` is located)
+     3. `~/.quickcall.env` in home directory
+   - If a token is found, it validates and connects automatically
+   - If no token is found, it returns an error with helpful instructions
 
-2. **Auto-detect PAT from .quickcall.env (IMPORTANT):**
-   - Use the Read tool to check if `.quickcall.env` exists in the current project directory
-   - If found, read it and look for `GITHUB_TOKEN=...` or `GITHUB_PAT=...`
-   - If a token is found in the file, use it automatically (do NOT ask the user)
-   - Also check `~/.quickcall.env` if not found in project root
+2. **If no token found automatically:**
+   - Ask the user for their GitHub Personal Access Token
+   - Remind them: "Create a PAT at https://github.com/settings/tokens with scopes: project, read:user, repo"
+   - Or suggest: "Create a `.quickcall.env` file in your project root with `GITHUB_TOKEN=ghp_xxx`"
+   - Call `connect_github_via_pat` with the provided token
 
-3. **Get PAT from user (only if not found in .quickcall.env):**
-   - If no token was found in config files, ask the user for their GitHub Personal Access Token
-   - Remind them: "Create a PAT at https://github.com/settings/tokens with `repo` scope"
-   - Or suggest: "You can also create a `.quickcall.env` file with `GITHUB_TOKEN=your_token`"
-
-4. **Connect:**
-   - Call `connect_github_via_pat` with the token (from file or user input)
-   - The tool validates the token and auto-detects username
-
-5. **Show result:**
+3. **Show result:**
    ```
    GitHub connected via PAT!
    Username: {username}
-   Mode: Personal Access Token
-   Source: .quickcall.env (or "manually provided")
+   Token source: {token_source}
    ```
 
 ## Notes
