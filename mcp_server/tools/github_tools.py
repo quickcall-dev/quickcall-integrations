@@ -571,11 +571,12 @@ def create_github_tools(mcp: FastMCP) -> None:
         action: str = Field(
             ...,
             description="Action: 'list', 'view', 'create', 'update', 'close', 'reopen', 'comment', "
-            "'add_sub_issue', 'remove_sub_issue', 'list_sub_issues'",
+            "'add_sub_issue', 'remove_sub_issue', 'list_sub_issues', "
+            "'list_projects', 'add_to_project', 'remove_from_project'",
         ),
         issue_numbers: Optional[List[int]] = Field(
             default=None,
-            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue ops.",
+            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue/project ops.",
         ),
         title: Optional[str] = Field(
             default=None,
@@ -601,6 +602,16 @@ def create_github_tools(mcp: FastMCP) -> None:
             default=None,
             description="Parent issue number. For 'create': attach new issue as sub-issue. "
             "For 'add_sub_issue'/'remove_sub_issue'/'list_sub_issues': the parent issue.",
+        ),
+        project: Optional[str] = Field(
+            default=None,
+            description="Project number or title. For 'create': add issue to project after creation. "
+            "For 'add_to_project'/'remove_from_project': the target project.",
+        ),
+        project_owner: Optional[str] = Field(
+            default=None,
+            description="Owner of the project (org or user). Defaults to repo owner. "
+            "Use when project is in a different org than the repo.",
         ),
         owner: Optional[str] = Field(
             default=None,
@@ -642,11 +653,15 @@ def create_github_tools(mcp: FastMCP) -> None:
         - view: manage_issues(action="view", issue_numbers=[42])
         - create: manage_issues(action="create", title="Bug", template="bug_report")
         - create as sub-issue: manage_issues(action="create", title="Task 1", parent_issue=42)
+        - create and add to project: manage_issues(action="create", title="Task", project="1")
         - close multiple: manage_issues(action="close", issue_numbers=[1, 2, 3])
         - comment: manage_issues(action="comment", issue_numbers=[42], body="Fixed!")
         - add sub-issues: manage_issues(action="add_sub_issue", issue_numbers=[43,44], parent_issue=42)
         - remove sub-issue: manage_issues(action="remove_sub_issue", issue_numbers=[43], parent_issue=42)
         - list sub-issues: manage_issues(action="list_sub_issues", parent_issue=42)
+        - list projects: manage_issues(action="list_projects", owner="org-name")
+        - add to project: manage_issues(action="add_to_project", issue_numbers=[90], project="1")
+        - remove from project: manage_issues(action="remove_from_project", issue_numbers=[90], project="1")
         """
         try:
             client = _get_client()
@@ -669,6 +684,112 @@ def create_github_tools(mcp: FastMCP) -> None:
                     "state": state or "open",
                     "count": len(issues),
                     "issues": issues,
+                }
+
+            # === LIST PROJECTS ACTION ===
+            if action == "list_projects":
+                proj_owner = project_owner or owner
+                if not proj_owner:
+                    raise ToolError(
+                        "'owner' or 'project_owner' is required for 'list_projects' action"
+                    )
+                projects = client.list_projects(
+                    owner=proj_owner,
+                    is_org=True,  # Try org first, falls back to user
+                    limit=limit or 20,
+                )
+                return {
+                    "action": "list_projects",
+                    "owner": proj_owner,
+                    "count": len(projects),
+                    "projects": projects,
+                }
+
+            # === ADD TO PROJECT ACTION ===
+            if action == "add_to_project":
+                if not project:
+                    raise ToolError("'project' is required for 'add_to_project' action")
+                if not issue_numbers:
+                    raise ToolError(
+                        "'issue_numbers' is required for 'add_to_project' action"
+                    )
+
+                results = []
+                for issue_number in issue_numbers:
+                    try:
+                        result = client.add_issue_to_project(
+                            issue_number=issue_number,
+                            project=project,
+                            owner=owner,
+                            repo=repo,
+                            project_owner=project_owner,
+                        )
+                        results.append(
+                            {
+                                "number": issue_number,
+                                "status": "added_to_project",
+                                "project": project,
+                                "project_item_id": result.get("project_item_id"),
+                            }
+                        )
+                    except Exception as e:
+                        results.append(
+                            {
+                                "number": issue_number,
+                                "status": "error",
+                                "error": str(e),
+                            }
+                        )
+
+                return {
+                    "action": "add_to_project",
+                    "project": project,
+                    "count": len(results),
+                    "results": results,
+                }
+
+            # === REMOVE FROM PROJECT ACTION ===
+            if action == "remove_from_project":
+                if not project:
+                    raise ToolError(
+                        "'project' is required for 'remove_from_project' action"
+                    )
+                if not issue_numbers:
+                    raise ToolError(
+                        "'issue_numbers' is required for 'remove_from_project' action"
+                    )
+
+                results = []
+                for issue_number in issue_numbers:
+                    try:
+                        client.remove_issue_from_project(
+                            issue_number=issue_number,
+                            project=project,
+                            owner=owner,
+                            repo=repo,
+                            project_owner=project_owner,
+                        )
+                        results.append(
+                            {
+                                "number": issue_number,
+                                "status": "removed_from_project",
+                                "project": project,
+                            }
+                        )
+                    except Exception as e:
+                        results.append(
+                            {
+                                "number": issue_number,
+                                "status": "error",
+                                "error": str(e),
+                            }
+                        )
+
+                return {
+                    "action": "remove_from_project",
+                    "project": project,
+                    "count": len(results),
+                    "results": results,
                 }
 
             # === CREATE ACTION ===
@@ -712,6 +833,22 @@ def create_github_tools(mcp: FastMCP) -> None:
                         result["sub_issue_linked"] = sub_result.get("success", False)
                     except Exception as e:
                         result["sub_issue_error"] = str(e)
+
+                # If project specified, add to project
+                if project:
+                    try:
+                        proj_result = client.add_issue_to_project(
+                            issue_number=issue["number"],
+                            project=project,
+                            owner=owner,
+                            repo=repo,
+                            project_owner=project_owner,
+                        )
+                        result["project"] = project
+                        result["project_added"] = proj_result.get("success", False)
+                        result["project_item_id"] = proj_result.get("project_item_id")
+                    except Exception as e:
+                        result["project_error"] = str(e)
 
                 return result
 
