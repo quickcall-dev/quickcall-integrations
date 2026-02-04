@@ -417,6 +417,549 @@ class GitHubClient:
             html_url=pr.html_url,
         )
 
+    def create_pr(
+        self,
+        title: str,
+        head: str,
+        base: str,
+        body: Optional[str] = None,
+        draft: bool = False,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> PullRequest:
+        """
+        Create a new pull request.
+
+        Args:
+            title: PR title
+            head: Branch containing changes (e.g., "feature-branch")
+            base: Branch to merge into (e.g., "main")
+            body: PR description
+            draft: Create as draft PR
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Created PullRequest
+        """
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.create_pull(
+            title=title,
+            head=head,
+            base=base,
+            body=body or "",
+            draft=draft,
+        )
+        return self._convert_pr(pr)
+
+    def update_pr(
+        self,
+        pr_number: int,
+        title: Optional[str] = None,
+        body: Optional[str] = None,
+        state: Optional[str] = None,
+        base: Optional[str] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> PullRequest:
+        """
+        Update an existing pull request.
+
+        Args:
+            pr_number: PR number
+            title: New title
+            body: New description
+            state: New state ('open' or 'closed')
+            base: New base branch
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Updated PullRequest
+        """
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.get_pull(pr_number)
+
+        kwargs = {}
+        if title is not None:
+            kwargs["title"] = title
+        if body is not None:
+            kwargs["body"] = body
+        if state is not None:
+            kwargs["state"] = state
+        if base is not None:
+            kwargs["base"] = base
+
+        if kwargs:
+            pr.edit(**kwargs)
+
+        return self._convert_pr(pr)
+
+    def merge_pr(
+        self,
+        pr_number: int,
+        commit_title: Optional[str] = None,
+        commit_message: Optional[str] = None,
+        merge_method: str = "merge",
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Merge a pull request.
+
+        Args:
+            pr_number: PR number
+            commit_title: Custom commit title (for squash/merge)
+            commit_message: Custom commit message
+            merge_method: 'merge', 'squash', or 'rebase'
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with merge status and SHA
+        """
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.get_pull(pr_number)
+
+        # Check if PR is mergeable
+        if pr.merged:
+            return {
+                "merged": True,
+                "message": "PR was already merged",
+                "sha": pr.merge_commit_sha,
+            }
+
+        if not pr.mergeable:
+            return {
+                "merged": False,
+                "message": "PR is not mergeable (conflicts or checks failing)",
+                "sha": None,
+            }
+
+        # Merge the PR
+        result = pr.merge(
+            commit_title=commit_title,
+            commit_message=commit_message,
+            merge_method=merge_method,
+        )
+
+        return {
+            "merged": result.merged,
+            "message": result.message,
+            "sha": result.sha,
+        }
+
+    def close_pr(
+        self,
+        pr_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> PullRequest:
+        """Close a pull request without merging."""
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.get_pull(pr_number)
+        pr.edit(state="closed")
+        return self._convert_pr(pr)
+
+    def reopen_pr(
+        self,
+        pr_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> PullRequest:
+        """Reopen a closed pull request."""
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.get_pull(pr_number)
+        pr.edit(state="open")
+        return self._convert_pr(pr)
+
+    def add_pr_comment(
+        self,
+        pr_number: int,
+        body: str,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add a comment to a pull request.
+
+        Args:
+            pr_number: PR number
+            body: Comment text
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Comment details
+        """
+        gh_repo = self._get_repo(owner, repo)
+        # PRs use the issue comment API
+        issue = gh_repo.get_issue(pr_number)
+        comment = issue.create_comment(body)
+        return {
+            "id": comment.id,
+            "body": comment.body,
+            "html_url": comment.html_url,
+            "created_at": comment.created_at.isoformat(),
+            "pr_number": pr_number,
+        }
+
+    def request_reviewers(
+        self,
+        pr_number: int,
+        reviewers: Optional[List[str]] = None,
+        team_reviewers: Optional[List[str]] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Request reviewers for a pull request.
+
+        Args:
+            pr_number: PR number
+            reviewers: List of GitHub usernames
+            team_reviewers: List of team slugs (org teams)
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with requested reviewers
+        """
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.get_pull(pr_number)
+
+        # Create review request
+        pr.create_review_request(
+            reviewers=reviewers or [],
+            team_reviewers=team_reviewers or [],
+        )
+
+        # Re-fetch to get updated reviewers
+        pr = gh_repo.get_pull(pr_number)
+        return {
+            "pr_number": pr_number,
+            "requested_reviewers": [r.login for r in pr.requested_reviewers],
+            "requested_teams": [t.slug for t in pr.requested_teams],
+        }
+
+    def submit_pr_review(
+        self,
+        pr_number: int,
+        event: str,
+        body: Optional[str] = None,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Submit a review on a pull request.
+
+        Args:
+            pr_number: PR number
+            event: Review event - 'APPROVE', 'REQUEST_CHANGES', or 'COMMENT'
+            body: Review comment (required for REQUEST_CHANGES)
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Review details
+        """
+        gh_repo = self._get_repo(owner, repo)
+        pr = gh_repo.get_pull(pr_number)
+
+        review = pr.create_review(
+            body=body or "",
+            event=event,
+        )
+
+        return {
+            "id": review.id,
+            "state": review.state,
+            "body": review.body,
+            "html_url": review.html_url,
+            "pr_number": pr_number,
+        }
+
+    def convert_pr_to_draft(
+        self,
+        pr_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Convert a PR to draft status using GraphQL API.
+
+        Args:
+            pr_number: PR number
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with success status
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        # Get PR node ID
+        query = """
+        query($owner: String!, $repo: String!, $number: Int!) {
+            repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                    id
+                    isDraft
+                }
+            }
+        }
+        """
+        data = self._graphql_request(
+            query, {"owner": owner, "repo": repo, "number": pr_number}
+        )
+        repository = data.get("repository")
+        if not repository:
+            raise GithubException(
+                404, {"message": f"Repository {owner}/{repo} not found"}
+            )
+        pr_data = repository.get("pullRequest")
+        if not pr_data:
+            raise GithubException(404, {"message": f"PR #{pr_number} not found"})
+
+        if pr_data.get("isDraft"):
+            return {
+                "pr_number": pr_number,
+                "is_draft": True,
+                "message": "PR is already a draft",
+            }
+
+        pr_node_id = pr_data["id"]
+
+        # Convert to draft
+        mutation = """
+        mutation($pullRequestId: ID!) {
+            convertPullRequestToDraft(input: {pullRequestId: $pullRequestId}) {
+                pullRequest {
+                    id
+                    isDraft
+                }
+            }
+        }
+        """
+        result = self._graphql_request(mutation, {"pullRequestId": pr_node_id})
+        converted = result.get("convertPullRequestToDraft", {}).get("pullRequest", {})
+
+        return {
+            "pr_number": pr_number,
+            "is_draft": converted.get("isDraft", True),
+            "message": "PR converted to draft",
+        }
+
+    def mark_pr_ready_for_review(
+        self,
+        pr_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Mark a draft PR as ready for review using GraphQL API.
+
+        Args:
+            pr_number: PR number
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with success status
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        # Get PR node ID
+        query = """
+        query($owner: String!, $repo: String!, $number: Int!) {
+            repository(owner: $owner, name: $repo) {
+                pullRequest(number: $number) {
+                    id
+                    isDraft
+                }
+            }
+        }
+        """
+        data = self._graphql_request(
+            query, {"owner": owner, "repo": repo, "number": pr_number}
+        )
+        repository = data.get("repository")
+        if not repository:
+            raise GithubException(
+                404, {"message": f"Repository {owner}/{repo} not found"}
+            )
+        pr_data = repository.get("pullRequest")
+        if not pr_data:
+            raise GithubException(404, {"message": f"PR #{pr_number} not found"})
+
+        if not pr_data.get("isDraft"):
+            return {
+                "pr_number": pr_number,
+                "is_draft": False,
+                "message": "PR is already ready for review",
+            }
+
+        pr_node_id = pr_data["id"]
+
+        # Mark ready for review
+        mutation = """
+        mutation($pullRequestId: ID!) {
+            markPullRequestReadyForReview(input: {pullRequestId: $pullRequestId}) {
+                pullRequest {
+                    id
+                    isDraft
+                }
+            }
+        }
+        """
+        result = self._graphql_request(mutation, {"pullRequestId": pr_node_id})
+        converted = result.get("markPullRequestReadyForReview", {}).get(
+            "pullRequest", {}
+        )
+
+        return {
+            "pr_number": pr_number,
+            "is_draft": converted.get("isDraft", False),
+            "message": "PR marked ready for review",
+        }
+
+    def add_pr_labels(
+        self,
+        pr_number: int,
+        labels: List[str],
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add labels to a pull request.
+
+        Args:
+            pr_number: PR number
+            labels: List of label names
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with updated labels
+        """
+        gh_repo = self._get_repo(owner, repo)
+        # PRs use the issue API for labels
+        issue = gh_repo.get_issue(pr_number)
+        issue.add_to_labels(*labels)
+
+        return {
+            "pr_number": pr_number,
+            "labels": [label.name for label in issue.labels],
+        }
+
+    def remove_pr_labels(
+        self,
+        pr_number: int,
+        labels: List[str],
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Remove labels from a pull request.
+
+        Args:
+            pr_number: PR number
+            labels: List of label names to remove
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with updated labels
+        """
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(pr_number)
+
+        for label in labels:
+            try:
+                issue.remove_from_labels(label)
+            except GithubException as e:
+                if e.status != 404:  # Ignore if label not present
+                    raise
+
+        # Re-fetch to get updated labels
+        issue = gh_repo.get_issue(pr_number)
+        return {
+            "pr_number": pr_number,
+            "labels": [label.name for label in issue.labels],
+        }
+
+    def add_pr_assignees(
+        self,
+        pr_number: int,
+        assignees: List[str],
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Add assignees to a pull request.
+
+        Args:
+            pr_number: PR number
+            assignees: List of GitHub usernames
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with updated assignees
+        """
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(pr_number)
+        issue.add_to_assignees(*assignees)
+
+        return {
+            "pr_number": pr_number,
+            "assignees": [a.login for a in issue.assignees],
+        }
+
+    def remove_pr_assignees(
+        self,
+        pr_number: int,
+        assignees: List[str],
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Remove assignees from a pull request.
+
+        Args:
+            pr_number: PR number
+            assignees: List of GitHub usernames to remove
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with updated assignees
+        """
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(pr_number)
+
+        for assignee in assignees:
+            try:
+                issue.remove_from_assignees(assignee)
+            except GithubException as e:
+                if e.status != 404:  # Ignore if not assigned
+                    raise
+
+        # Re-fetch to get updated assignees
+        issue = gh_repo.get_issue(pr_number)
+        return {
+            "pr_number": pr_number,
+            "assignees": [a.login for a in issue.assignees],
+        }
+
     # ========================================================================
     # Commit Operations
     # ========================================================================

@@ -850,6 +850,404 @@ def create_github_tools(mcp: FastMCP) -> None:
         except Exception as e:
             raise ToolError(f"Failed to {action} issue(s): {str(e)}")
 
+    @mcp.tool(tags={"github", "prs"})
+    def manage_prs(
+        action: str = Field(
+            ...,
+            description="Action: 'list', 'view', 'create', 'update', 'merge', 'close', 'reopen', "
+            "'comment', 'request_reviewers', 'review', 'to_draft', 'ready_for_review', "
+            "'add_labels', 'remove_labels', 'add_assignees', 'remove_assignees'",
+        ),
+        pr_numbers: Optional[List[int]] = Field(
+            default=None,
+            description="PR number(s). Required for view/update/merge/close/reopen/comment/review/labels/assignees actions.",
+        ),
+        title: Optional[str] = Field(
+            default=None,
+            description="PR title (for 'create' or 'update')",
+        ),
+        body: Optional[str] = Field(
+            default=None,
+            description="PR body/description (for 'create'/'update') or comment text (for 'comment')",
+        ),
+        head: Optional[str] = Field(
+            default=None,
+            description="Source branch containing changes (for 'create')",
+        ),
+        base: Optional[str] = Field(
+            default=None,
+            description="Target branch to merge into (for 'create', default: repo default branch)",
+        ),
+        draft: Optional[bool] = Field(
+            default=None,
+            description="Create as draft PR (for 'create')",
+        ),
+        merge_method: Optional[str] = Field(
+            default="merge",
+            description="Merge strategy: 'merge', 'squash', or 'rebase' (for 'merge' action)",
+        ),
+        reviewers: Optional[List[str]] = Field(
+            default=None,
+            description="GitHub usernames to request review from (for 'request_reviewers')",
+        ),
+        team_reviewers: Optional[List[str]] = Field(
+            default=None,
+            description="Team slugs to request review from (for 'request_reviewers')",
+        ),
+        review_event: Optional[str] = Field(
+            default=None,
+            description="Review event: 'APPROVE', 'REQUEST_CHANGES', or 'COMMENT' (for 'review' action)",
+        ),
+        labels: Optional[List[str]] = Field(
+            default=None,
+            description="Labels (for 'add_labels' or 'remove_labels')",
+        ),
+        assignees: Optional[List[str]] = Field(
+            default=None,
+            description="GitHub usernames for assignees. For 'create': defaults to self if not specified. "
+            "For 'add_assignees'/'remove_assignees': required.",
+        ),
+        owner: Optional[str] = Field(
+            default=None,
+            description="Repository owner",
+        ),
+        repo: Optional[str] = Field(
+            default=None,
+            description="Repository name. Required.",
+        ),
+        state: Optional[str] = Field(
+            default="open",
+            description="PR state filter for 'list': 'open', 'closed', or 'all' (default: 'open')",
+        ),
+        limit: Optional[int] = Field(
+            default=20,
+            description="Maximum PRs to return for 'list' action (default: 20)",
+        ),
+    ) -> dict:
+        """
+        Manage GitHub pull requests: list, view, create, update, merge, close, reopen, comment, and review.
+
+        Supports bulk operations for view/close/reopen/comment via pr_numbers list.
+
+        Examples:
+        - list: manage_prs(action="list", state="open")
+        - view: manage_prs(action="view", pr_numbers=[42])
+        - create: manage_prs(action="create", title="Feature X", head="feature-branch", base="main")
+        - create draft: manage_prs(action="create", title="WIP", head="wip-branch", draft=True)
+        - update: manage_prs(action="update", pr_numbers=[42], title="New title", body="Updated desc")
+        - merge: manage_prs(action="merge", pr_numbers=[42], merge_method="squash")
+        - close: manage_prs(action="close", pr_numbers=[42])
+        - reopen: manage_prs(action="reopen", pr_numbers=[42])
+        - comment: manage_prs(action="comment", pr_numbers=[42], body="LGTM!")
+        - request review: manage_prs(action="request_reviewers", pr_numbers=[42], reviewers=["user1"])
+        - approve: manage_prs(action="review", pr_numbers=[42], review_event="APPROVE", body="Looks good!")
+        - to draft: manage_prs(action="to_draft", pr_numbers=[42])
+        - ready: manage_prs(action="ready_for_review", pr_numbers=[42])
+        - add labels: manage_prs(action="add_labels", pr_numbers=[42], labels=["bug", "urgent"])
+        - remove labels: manage_prs(action="remove_labels", pr_numbers=[42], labels=["wip"])
+        - add assignees: manage_prs(action="add_assignees", pr_numbers=[42], assignees=["user1"])
+        - remove assignees: manage_prs(action="remove_assignees", pr_numbers=[42], assignees=["user1"])
+        """
+        try:
+            client = _get_client()
+
+            # === LIST ACTION ===
+            if action == "list":
+                prs = client.list_prs(
+                    owner=owner,
+                    repo=repo,
+                    state=state or "open",
+                    limit=limit or 20,
+                    detail_level="summary",
+                )
+                return {
+                    "action": "list",
+                    "state": state or "open",
+                    "count": len(prs),
+                    "prs": [pr.model_dump() for pr in prs],
+                }
+
+            # === CREATE ACTION ===
+            if action == "create":
+                if not title:
+                    raise ToolError("'title' is required for 'create' action")
+                if not head:
+                    raise ToolError(
+                        "'head' (source branch) is required for 'create' action"
+                    )
+
+                pr = client.create_pr(
+                    title=title,
+                    head=head,
+                    base=base or "main",
+                    body=body,
+                    draft=draft or False,
+                    owner=owner,
+                    repo=repo,
+                )
+
+                result = {
+                    "action": "created",
+                    "pr": pr.model_dump(),
+                }
+
+                # Auto-assign to self if assignees not specified
+                pr_assignees = assignees
+                if pr_assignees is None:
+                    # Default to current user
+                    current_user = client.get_authenticated_user()
+                    if current_user:
+                        pr_assignees = [current_user]
+
+                if pr_assignees:
+                    try:
+                        assign_result = client.add_pr_assignees(
+                            pr.number, assignees=pr_assignees, owner=owner, repo=repo
+                        )
+                        result["assignees"] = assign_result["assignees"]
+                    except Exception as e:
+                        result["assignee_error"] = str(e)
+
+                return result
+
+            # === ALL OTHER ACTIONS REQUIRE pr_numbers ===
+            if not pr_numbers:
+                raise ToolError(f"'pr_numbers' required for '{action}' action")
+
+            results = []
+            for pr_number in pr_numbers:
+                # === VIEW ACTION ===
+                if action == "view":
+                    pr_data = client.get_pr(
+                        pr_number=pr_number,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    if pr_data:
+                        results.append(pr_data.model_dump())
+                    else:
+                        results.append({"number": pr_number, "error": "PR not found"})
+
+                # === UPDATE ACTION ===
+                elif action == "update":
+                    pr_data = client.update_pr(
+                        pr_number=pr_number,
+                        title=title,
+                        body=body,
+                        base=base,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "updated",
+                            "pr": pr_data.model_dump(),
+                        }
+                    )
+
+                # === MERGE ACTION ===
+                elif action == "merge":
+                    merge_result = client.merge_pr(
+                        pr_number=pr_number,
+                        merge_method=merge_method or "merge",
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "merged" if merge_result["merged"] else "failed",
+                            "message": merge_result["message"],
+                            "sha": merge_result["sha"],
+                        }
+                    )
+
+                # === CLOSE ACTION ===
+                elif action == "close":
+                    client.close_pr(pr_number, owner=owner, repo=repo)
+                    results.append({"number": pr_number, "status": "closed"})
+
+                # === REOPEN ACTION ===
+                elif action == "reopen":
+                    client.reopen_pr(pr_number, owner=owner, repo=repo)
+                    results.append({"number": pr_number, "status": "reopened"})
+
+                # === COMMENT ACTION ===
+                elif action == "comment":
+                    if not body:
+                        raise ToolError("'body' is required for 'comment' action")
+                    comment = client.add_pr_comment(
+                        pr_number, body=body, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "commented",
+                            "comment_url": comment["html_url"],
+                        }
+                    )
+
+                # === REQUEST REVIEWERS ACTION ===
+                elif action == "request_reviewers":
+                    if not reviewers and not team_reviewers:
+                        raise ToolError(
+                            "'reviewers' or 'team_reviewers' required for 'request_reviewers' action"
+                        )
+                    review_result = client.request_reviewers(
+                        pr_number,
+                        reviewers=reviewers,
+                        team_reviewers=team_reviewers,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "reviewers_requested",
+                            "requested_reviewers": review_result["requested_reviewers"],
+                            "requested_teams": review_result["requested_teams"],
+                        }
+                    )
+
+                # === REVIEW ACTION ===
+                elif action == "review":
+                    if not review_event:
+                        raise ToolError(
+                            "'review_event' (APPROVE, REQUEST_CHANGES, COMMENT) required for 'review' action"
+                        )
+                    if review_event == "REQUEST_CHANGES" and not body:
+                        raise ToolError("'body' is required when requesting changes")
+                    review_result = client.submit_pr_review(
+                        pr_number,
+                        event=review_event,
+                        body=body,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "reviewed",
+                            "review_state": review_result["state"],
+                            "review_url": review_result["html_url"],
+                        }
+                    )
+
+                # === TO DRAFT ACTION ===
+                elif action == "to_draft":
+                    draft_result = client.convert_pr_to_draft(
+                        pr_number, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "converted_to_draft",
+                            "is_draft": draft_result["is_draft"],
+                            "message": draft_result["message"],
+                        }
+                    )
+
+                # === READY FOR REVIEW ACTION ===
+                elif action == "ready_for_review":
+                    ready_result = client.mark_pr_ready_for_review(
+                        pr_number, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "marked_ready",
+                            "is_draft": ready_result["is_draft"],
+                            "message": ready_result["message"],
+                        }
+                    )
+
+                # === ADD LABELS ACTION ===
+                elif action == "add_labels":
+                    if not labels:
+                        raise ToolError("'labels' is required for 'add_labels' action")
+                    label_result = client.add_pr_labels(
+                        pr_number, labels=labels, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "labels_added",
+                            "labels": label_result["labels"],
+                        }
+                    )
+
+                # === REMOVE LABELS ACTION ===
+                elif action == "remove_labels":
+                    if not labels:
+                        raise ToolError(
+                            "'labels' is required for 'remove_labels' action"
+                        )
+                    label_result = client.remove_pr_labels(
+                        pr_number, labels=labels, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "labels_removed",
+                            "labels": label_result["labels"],
+                        }
+                    )
+
+                # === ADD ASSIGNEES ACTION ===
+                elif action == "add_assignees":
+                    if not assignees:
+                        raise ToolError(
+                            "'assignees' is required for 'add_assignees' action"
+                        )
+                    assign_result = client.add_pr_assignees(
+                        pr_number, assignees=assignees, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "assignees_added",
+                            "assignees": assign_result["assignees"],
+                        }
+                    )
+
+                # === REMOVE ASSIGNEES ACTION ===
+                elif action == "remove_assignees":
+                    if not assignees:
+                        raise ToolError(
+                            "'assignees' is required for 'remove_assignees' action"
+                        )
+                    assign_result = client.remove_pr_assignees(
+                        pr_number, assignees=assignees, owner=owner, repo=repo
+                    )
+                    results.append(
+                        {
+                            "number": pr_number,
+                            "status": "assignees_removed",
+                            "assignees": assign_result["assignees"],
+                        }
+                    )
+
+                else:
+                    raise ToolError(f"Invalid action: {action}")
+
+            # Return format depends on action
+            if action == "view":
+                return {
+                    "action": "view",
+                    "count": len(results),
+                    "prs": results,
+                }
+
+            return {"action": action, "count": len(results), "results": results}
+
+        except ToolError:
+            raise
+        except ValueError as e:
+            raise ToolError(f"Repository not specified: {str(e)}")
+        except Exception as e:
+            raise ToolError(f"Failed to {action} PR(s): {str(e)}")
+
     @mcp.tool(tags={"github", "prs", "appraisal"})
     def prepare_appraisal_data(
         author: Optional[str] = Field(

@@ -77,7 +77,7 @@ Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 | **Slack** | Read/send messages, threads, channels | Yes |
 
 <details>
-<summary><strong>Available Tools (24)</strong></summary>
+<summary><strong>Available Tools (26)</strong></summary>
 
 ### Git
 | Tool | Description |
@@ -94,6 +94,8 @@ Add to MCP config (`~/.cursor/mcp.json` or `.cursor/mcp.json`):
 | `get_commit` | Get commit details (message, stats, files) |
 | `list_branches` | List repository branches |
 | `manage_issues` | List, view, create, update, close, reopen, comment on issues + sub-issues |
+| `manage_prs` | Full PR lifecycle: create, update, merge, close, review, comment, labels, assignees |
+| `manage_projects` | GitHub Projects V2: add issues, update fields (Status, Priority, etc.) |
 | `check_github_connection` | Verify GitHub connection |
 
 ### Slack
@@ -180,6 +182,8 @@ GITHUB_USERNAME=your-username  # Optional: for better UX
 | `/quickcall:status` | Show connection status |
 | `/quickcall:updates` | Get git updates (default: 1 day) |
 | `/quickcall:updates 7d` | Get updates for last 7 days |
+| `/quickcall:pr-summary` | List open PRs for a repo |
+| `/quickcall:pr-summary owner/repo` | List PRs for specific repo |
 | `/quickcall:slack-summary` | Summarize Slack messages (default: 1 day) |
 | `/quickcall:slack-summary 7d` | Summarize last 7 days |
 
@@ -313,6 +317,46 @@ feature_request:
 Create a bug report issue titled "Login fails on Safari"
 Create issue with feature_request template
 ```
+
+## PR Management
+
+The `manage_prs` tool provides full pull request lifecycle management:
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `list` | List PRs with state filter |
+| `view` | View PR details |
+| `create` | Create PR (auto-assigns to self) |
+| `update` | Update title, body, base branch |
+| `merge` | Merge PR (merge/squash/rebase) |
+| `close` | Close PR without merging |
+| `reopen` | Reopen closed PR |
+| `comment` | Add comment to PR |
+| `request_reviewers` | Request user/team reviewers |
+| `review` | Submit review (APPROVE, REQUEST_CHANGES, COMMENT) |
+| `to_draft` | Convert PR to draft |
+| `ready_for_review` | Mark draft as ready |
+| `add_labels` | Add labels to PR |
+| `remove_labels` | Remove labels from PR |
+| `add_assignees` | Add assignees |
+| `remove_assignees` | Remove assignees |
+
+### Examples
+
+```
+List open PRs on my-repo
+Create a PR from feature-branch to main titled "Add new feature"
+Merge PR #42 with squash
+Request review from @alice on PR #42
+Approve PR #42 with comment "LGTM!"
+Add labels bug and urgent to PR #42
+```
+
+### Auto-assign
+
+When creating a PR, it automatically assigns to the current user unless `assignees` is explicitly provided.
 
 ## Troubleshooting
 
