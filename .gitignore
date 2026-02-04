@@ -108,3 +108,5 @@ dmypy.json
 .DS_Store
 Thumbs.db
 .githooks/
+.specstory/.gitignore
+.cursorindexingignore

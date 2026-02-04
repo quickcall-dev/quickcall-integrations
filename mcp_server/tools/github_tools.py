@@ -575,7 +575,7 @@ def create_github_tools(mcp: FastMCP) -> None:
         ),
         issue_numbers: Optional[List[int]] = Field(
             default=None,
-            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue ops.",
+            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue/project ops.",
         ),
         title: Optional[str] = Field(
             default=None,
@@ -647,6 +647,8 @@ def create_github_tools(mcp: FastMCP) -> None:
         - add sub-issues: manage_issues(action="add_sub_issue", issue_numbers=[43,44], parent_issue=42)
         - remove sub-issue: manage_issues(action="remove_sub_issue", issue_numbers=[43], parent_issue=42)
         - list sub-issues: manage_issues(action="list_sub_issues", parent_issue=42)
+
+        For project operations (add to project, update fields), use manage_projects() instead.
         """
         try:
             client = _get_client()
@@ -1091,3 +1093,237 @@ def create_github_tools(mcp: FastMCP) -> None:
                 "connected": False,
                 "error": str(e),
             }
+
+    @mcp.tool(tags={"github", "projects"})
+    def manage_projects(
+        action: str = Field(
+            ...,
+            description="Action: 'list', 'add', 'remove', 'update_fields'",
+        ),
+        issue_numbers: Optional[List[int]] = Field(
+            default=None,
+            description="Issue number(s) for add/remove/update_fields actions.",
+        ),
+        project: Optional[str] = Field(
+            default=None,
+            description="Project number or title. Required for add/remove/update_fields.",
+        ),
+        fields: Optional[Dict[str, str]] = Field(
+            default=None,
+            description="Dict of field names to values for 'add' or 'update_fields'. "
+            "Example: {'Status': 'In Progress', 'Priority': 'High'}",
+        ),
+        owner: Optional[str] = Field(
+            default=None,
+            description="Repository owner (for the issues).",
+        ),
+        repo: Optional[str] = Field(
+            default=None,
+            description="Repository name (for the issues).",
+        ),
+        project_owner: Optional[str] = Field(
+            default=None,
+            description="Owner of the project (org or user). Defaults to repo owner.",
+        ),
+        limit: Optional[int] = Field(
+            default=20,
+            description="Maximum projects to return for 'list' action.",
+        ),
+    ) -> dict:
+        """
+        Manage GitHub Projects V2: list projects, add/remove issues, update fields.
+
+        IMPORTANT: Use 'add' with 'fields' to add issue AND set fields in ONE call.
+        Don't make separate calls for add + update_fields.
+
+        Examples:
+        - list: manage_projects(action="list", owner="org-name")
+        - add with fields: manage_projects(action="add", issue_numbers=[42], project="1",
+                           fields={"Status": "Triage", "Priority": "High"}, repo="my-repo")
+        - add only: manage_projects(action="add", issue_numbers=[42], project="1", repo="my-repo")
+        - remove: manage_projects(action="remove", issue_numbers=[42], project="1", repo="my-repo")
+        - update fields: manage_projects(action="update_fields", issue_numbers=[42], project="1",
+                         fields={"Status": "In Progress"}, repo="my-repo")
+        """
+        try:
+            client = _get_client()
+
+            # === LIST ACTION ===
+            if action == "list":
+                proj_owner = project_owner or owner
+                if not proj_owner:
+                    # Use authenticated user if no owner specified
+                    proj_owner = client.get_authenticated_user()
+
+                projects = client.list_projects(
+                    owner=proj_owner,
+                    is_org=True,  # Try org first, falls back to user
+                    limit=limit or 20,
+                )
+                return {
+                    "action": "list",
+                    "owner": proj_owner,
+                    "count": len(projects),
+                    "projects": projects,
+                }
+
+            # === ADD ACTION ===
+            if action == "add":
+                if not project:
+                    raise ToolError("'project' is required for 'add' action")
+                if not issue_numbers:
+                    raise ToolError("'issue_numbers' is required for 'add' action")
+
+                results = []
+                for issue_number in issue_numbers:
+                    issue_result = {
+                        "number": issue_number,
+                        "project": project,
+                    }
+                    try:
+                        result = client.add_issue_to_project(
+                            issue_number=issue_number,
+                            project=project,
+                            owner=owner,
+                            repo=repo,
+                            project_owner=project_owner,
+                        )
+                        issue_result["status"] = "added"
+                        issue_result["project_item_id"] = result.get("project_item_id")
+
+                        # If fields provided, set them after adding
+                        if fields:
+                            issue_result["fields_updated"] = []
+                            issue_result["field_errors"] = []
+                            for field_name, value in fields.items():
+                                try:
+                                    client.update_project_item_field(
+                                        issue_number=issue_number,
+                                        project=project,
+                                        field_name=field_name,
+                                        value=value,
+                                        owner=owner,
+                                        repo=repo,
+                                        project_owner=project_owner,
+                                    )
+                                    issue_result["fields_updated"].append(
+                                        {"field": field_name, "value": value}
+                                    )
+                                except Exception as e:
+                                    issue_result["field_errors"].append(
+                                        {"field": field_name, "error": str(e)}
+                                    )
+
+                        results.append(issue_result)
+                    except Exception as e:
+                        issue_result["status"] = "error"
+                        issue_result["error"] = str(e)
+                        results.append(issue_result)
+
+                return {
+                    "action": "add",
+                    "project": project,
+                    "count": len(results),
+                    "results": results,
+                }
+
+            # === REMOVE ACTION ===
+            if action == "remove":
+                if not project:
+                    raise ToolError("'project' is required for 'remove' action")
+                if not issue_numbers:
+                    raise ToolError("'issue_numbers' is required for 'remove' action")
+
+                results = []
+                for issue_number in issue_numbers:
+                    try:
+                        client.remove_issue_from_project(
+                            issue_number=issue_number,
+                            project=project,
+                            owner=owner,
+                            repo=repo,
+                            project_owner=project_owner,
+                        )
+                        results.append(
+                            {
+                                "number": issue_number,
+                                "status": "removed",
+                                "project": project,
+                            }
+                        )
+                    except Exception as e:
+                        results.append(
+                            {
+                                "number": issue_number,
+                                "status": "error",
+                                "error": str(e),
+                            }
+                        )
+
+                return {
+                    "action": "remove",
+                    "project": project,
+                    "count": len(results),
+                    "results": results,
+                }
+
+            # === UPDATE FIELDS ACTION ===
+            if action == "update_fields":
+                if not project:
+                    raise ToolError("'project' is required for 'update_fields' action")
+                if not issue_numbers:
+                    raise ToolError(
+                        "'issue_numbers' is required for 'update_fields' action"
+                    )
+                if not fields:
+                    raise ToolError("'fields' is required for 'update_fields' action")
+
+                results = []
+                for issue_number in issue_numbers:
+                    issue_result = {
+                        "number": issue_number,
+                        "fields_updated": [],
+                        "errors": [],
+                    }
+
+                    for field_name, value in fields.items():
+                        try:
+                            client.update_project_item_field(
+                                issue_number=issue_number,
+                                project=project,
+                                field_name=field_name,
+                                value=value,
+                                owner=owner,
+                                repo=repo,
+                                project_owner=project_owner,
+                            )
+                            issue_result["fields_updated"].append(
+                                {"field": field_name, "value": value}
+                            )
+                        except Exception as e:
+                            issue_result["errors"].append(
+                                {"field": field_name, "error": str(e)}
+                            )
+
+                    issue_result["status"] = (
+                        "success" if not issue_result["errors"] else "partial"
+                    )
+                    results.append(issue_result)
+
+                return {
+                    "action": "update_fields",
+                    "project": project,
+                    "count": len(results),
+                    "results": results,
+                }
+
+            raise ToolError(
+                f"Invalid action: {action}. Valid actions: list, add, remove, update_fields"
+            )
+
+        except ToolError:
+            raise
+        except ValueError as e:
+            raise ToolError(f"Invalid parameters: {str(e)}")
+        except Exception as e:
+            raise ToolError(f"Failed to {action} project: {str(e)}")
