@@ -239,9 +239,27 @@ The `manage_issues` tool provides full issue lifecycle management:
 | `close` | Close issue(s) |
 | `reopen` | Reopen issue(s) |
 | `comment` | Add comment to issue(s) |
+| `list_comments` | List comments with limit and order |
+| `update_comment` | Edit existing comment by ID |
+| `delete_comment` | Delete comment by ID |
 | `add_sub_issue` | Add child issue to parent |
 | `remove_sub_issue` | Remove child from parent |
 | `list_sub_issues` | List sub-issues of a parent |
+
+### Comment Management
+
+| Parameter | Description |
+|-----------|-------------|
+| `comment_id` | Comment ID for update/delete operations |
+| `comments_limit` | Max comments to return (default: 10) |
+| `comments_order` | `'asc'` (oldest first) or `'desc'` (newest first) |
+
+**Examples:**
+```
+List last 5 comments on issue #42 (newest first)
+Update comment 123456 on issue #42 with new text
+Delete comment 123456 from issue #42
+```
 
 ### List Filters
 

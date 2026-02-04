@@ -571,11 +571,12 @@ def create_github_tools(mcp: FastMCP) -> None:
         action: str = Field(
             ...,
             description="Action: 'list', 'view', 'create', 'update', 'close', 'reopen', 'comment', "
+            "'list_comments', 'update_comment', 'delete_comment', "
             "'add_sub_issue', 'remove_sub_issue', 'list_sub_issues'",
         ),
         issue_numbers: Optional[List[int]] = Field(
             default=None,
-            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue/project ops.",
+            description="Issue number(s). Required for view/update/close/reopen/comment/sub-issue/comment ops.",
         ),
         title: Optional[str] = Field(
             default=None,
@@ -583,7 +584,7 @@ def create_github_tools(mcp: FastMCP) -> None:
         ),
         body: Optional[str] = Field(
             default=None,
-            description="Issue body (for 'create'/'update') or comment text (for 'comment')",
+            description="Issue body (for 'create'/'update') or comment text (for 'comment'/'update_comment')",
         ),
         labels: Optional[List[str]] = Field(
             default=None,
@@ -601,6 +602,18 @@ def create_github_tools(mcp: FastMCP) -> None:
             default=None,
             description="Parent issue number. For 'create': attach new issue as sub-issue. "
             "For 'add_sub_issue'/'remove_sub_issue'/'list_sub_issues': the parent issue.",
+        ),
+        comment_id: Optional[int] = Field(
+            default=None,
+            description="Comment ID for 'update_comment' or 'delete_comment' actions.",
+        ),
+        comments_limit: Optional[int] = Field(
+            default=10,
+            description="Max comments to return for 'list_comments' (default: 10).",
+        ),
+        comments_order: Optional[str] = Field(
+            default="asc",
+            description="Comment order for 'list_comments': 'asc' (oldest first) or 'desc' (newest first).",
         ),
         owner: Optional[str] = Field(
             default=None,
@@ -644,6 +657,10 @@ def create_github_tools(mcp: FastMCP) -> None:
         - create as sub-issue: manage_issues(action="create", title="Task 1", parent_issue=42)
         - close multiple: manage_issues(action="close", issue_numbers=[1, 2, 3])
         - comment: manage_issues(action="comment", issue_numbers=[42], body="Fixed!")
+        - list comments: manage_issues(action="list_comments", issue_numbers=[42], comments_limit=5)
+        - list newest comments: manage_issues(action="list_comments", issue_numbers=[42], comments_order="desc")
+        - update comment: manage_issues(action="update_comment", issue_numbers=[42], comment_id=123, body="Updated")
+        - delete comment: manage_issues(action="delete_comment", issue_numbers=[42], comment_id=123)
         - add sub-issues: manage_issues(action="add_sub_issue", issue_numbers=[43,44], parent_issue=42)
         - remove sub-issue: manage_issues(action="remove_sub_issue", issue_numbers=[43], parent_issue=42)
         - list sub-issues: manage_issues(action="list_sub_issues", parent_issue=42)
@@ -830,6 +847,66 @@ def create_github_tools(mcp: FastMCP) -> None:
                         }
                     )
 
+                # === LIST COMMENTS ACTION ===
+                elif action == "list_comments":
+                    comments = client.list_issue_comments(
+                        issue_number=issue_number,
+                        owner=owner,
+                        repo=repo,
+                        limit=comments_limit or 10,
+                        order=comments_order or "asc",
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "comments_count": len(comments),
+                            "comments": comments,
+                        }
+                    )
+
+                # === UPDATE COMMENT ACTION ===
+                elif action == "update_comment":
+                    if not comment_id:
+                        raise ToolError(
+                            "'comment_id' is required for 'update_comment' action"
+                        )
+                    if not body:
+                        raise ToolError(
+                            "'body' is required for 'update_comment' action"
+                        )
+                    updated = client.update_issue_comment(
+                        comment_id=comment_id,
+                        body=body,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "status": "comment_updated",
+                            "comment": updated,
+                        }
+                    )
+
+                # === DELETE COMMENT ACTION ===
+                elif action == "delete_comment":
+                    if not comment_id:
+                        raise ToolError(
+                            "'comment_id' is required for 'delete_comment' action"
+                        )
+                    client.delete_issue_comment(
+                        comment_id=comment_id,
+                        owner=owner,
+                        repo=repo,
+                    )
+                    results.append(
+                        {
+                            "number": issue_number,
+                            "status": "comment_deleted",
+                            "comment_id": comment_id,
+                        }
+                    )
+
                 else:
                     raise ToolError(f"Invalid action: {action}")
 
@@ -837,6 +914,13 @@ def create_github_tools(mcp: FastMCP) -> None:
             if action == "view":
                 return {
                     "action": "view",
+                    "count": len(results),
+                    "issues": results,
+                }
+
+            if action == "list_comments":
+                return {
+                    "action": "list_comments",
                     "count": len(results),
                     "issues": results,
                 }
