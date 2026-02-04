@@ -1301,6 +1301,145 @@ class GitHubClient:
             "issue_number": issue_number,
         }
 
+    def list_issue_comments(
+        self,
+        issue_number: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+        limit: int = 10,
+        order: str = "asc",
+    ) -> List[Dict[str, Any]]:
+        """
+        List comments on a GitHub issue.
+
+        Args:
+            issue_number: Issue number
+            owner: Repository owner
+            repo: Repository name
+            limit: Maximum comments to return (default: 10)
+            order: 'asc' for oldest first, 'desc' for newest first (default: 'asc')
+
+        Returns:
+            List of comment dicts with id, body, author, timestamps, url
+        """
+        gh_repo = self._get_repo(owner, repo)
+        issue = gh_repo.get_issue(issue_number)
+
+        comments = []
+        all_comments = list(issue.get_comments())
+
+        # Apply order
+        if order == "desc":
+            all_comments = all_comments[::-1]
+
+        # Apply limit
+        for comment in all_comments[:limit]:
+            comments.append(
+                {
+                    "id": comment.id,
+                    "body": comment.body,
+                    "author": comment.user.login if comment.user else "unknown",
+                    "created_at": comment.created_at.isoformat(),
+                    "updated_at": comment.updated_at.isoformat()
+                    if comment.updated_at
+                    else None,
+                    "html_url": comment.html_url,
+                }
+            )
+
+        return comments
+
+    def get_issue_comment(
+        self,
+        comment_id: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Get a specific comment by ID.
+
+        Args:
+            comment_id: Comment ID
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Comment dict with id, body, author, timestamps, url
+        """
+        gh_repo = self._get_repo(owner, repo)
+        comment = gh_repo.get_issue_comment(comment_id)
+
+        return {
+            "id": comment.id,
+            "body": comment.body,
+            "author": comment.user.login if comment.user else "unknown",
+            "created_at": comment.created_at.isoformat(),
+            "updated_at": comment.updated_at.isoformat()
+            if comment.updated_at
+            else None,
+            "html_url": comment.html_url,
+        }
+
+    def update_issue_comment(
+        self,
+        comment_id: int,
+        body: str,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update an existing comment.
+
+        Args:
+            comment_id: Comment ID
+            body: New comment body
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Updated comment dict
+        """
+        gh_repo = self._get_repo(owner, repo)
+        comment = gh_repo.get_issue_comment(comment_id)
+        comment.edit(body)
+
+        return {
+            "id": comment.id,
+            "body": comment.body,
+            "author": comment.user.login if comment.user else "unknown",
+            "created_at": comment.created_at.isoformat(),
+            "updated_at": comment.updated_at.isoformat()
+            if comment.updated_at
+            else None,
+            "html_url": comment.html_url,
+        }
+
+    def delete_issue_comment(
+        self,
+        comment_id: int,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Delete a comment.
+
+        Args:
+            comment_id: Comment ID
+            owner: Repository owner
+            repo: Repository name
+
+        Returns:
+            Dict with deleted comment_id
+        """
+        gh_repo = self._get_repo(owner, repo)
+        comment = gh_repo.get_issue_comment(comment_id)
+        comment.delete()
+
+        return {
+            "deleted": True,
+            "comment_id": comment_id,
+        }
+
     def get_issue(
         self,
         issue_number: int,
