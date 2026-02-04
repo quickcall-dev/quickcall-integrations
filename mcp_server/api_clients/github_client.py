@@ -1583,3 +1583,478 @@ class GitHubClient:
             "project": project,
             "deleted_item_id": deleted_id,
         }
+
+    def get_project_fields(
+        self,
+        project: str,
+        owner: Optional[str] = None,
+        is_org: bool = True,
+    ) -> List[Dict[str, Any]]:
+        """
+        Get fields for a GitHub Project V2 with options for SingleSelect fields.
+
+        Args:
+            project: Project number (as string) or title
+            owner: Organization or user name
+            is_org: If True, treat owner as organization
+
+        Returns:
+            List of field dicts with id, name, data_type, and options for SingleSelect
+        """
+        owner = owner or self.default_owner
+        if not owner:
+            raise ValueError("Owner must be specified")
+
+        # Get project ID first
+        project_id = self.get_project_id(project, owner=owner, is_org=is_org)
+        if not project_id:
+            raise GithubException(
+                404, {"message": f"Project '{project}' not found for {owner}"}
+            )
+
+        # Query fields with options
+        query = """
+        query($projectId: ID!) {
+            node(id: $projectId) {
+                ... on ProjectV2 {
+                    fields(first: 100) {
+                        nodes {
+                            ... on ProjectV2FieldCommon {
+                                id
+                                name
+                                dataType
+                            }
+                            ... on ProjectV2SingleSelectField {
+                                options {
+                                    id
+                                    name
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        """
+        data = self._graphql_request(query, {"projectId": project_id})
+
+        node = data.get("node")
+        if not node:
+            return []
+
+        fields = []
+        for field in node.get("fields", {}).get("nodes", []):
+            if not field:
+                continue
+
+            field_data = {
+                "id": field.get("id"),
+                "name": field.get("name"),
+                "data_type": field.get("dataType"),
+            }
+
+            # Add options for SingleSelect fields
+            if "options" in field:
+                field_data["options"] = [
+                    {"id": opt["id"], "name": opt["name"]}
+                    for opt in field.get("options", [])
+                ]
+
+            fields.append(field_data)
+
+        return fields
+
+    def list_projects_with_fields(
+        self,
+        owner: Optional[str] = None,
+        is_org: bool = True,
+        limit: int = 20,
+    ) -> List[Dict[str, Any]]:
+        """
+        List GitHub Projects V2 with their fields in one GraphQL call.
+
+        More efficient than calling list_projects + get_project_fields separately.
+
+        Args:
+            owner: Organization or user name. Uses default_owner if not specified.
+            is_org: If True, treat owner as organization. If False, treat as user.
+            limit: Maximum projects to return (default: 20)
+
+        Returns:
+            List of project dicts with id, number, title, url, closed, owner, fields
+        """
+        owner = owner or self.default_owner
+        if not owner:
+            raise ValueError("Owner must be specified for listing projects")
+
+        if is_org:
+            query = """
+            query($owner: String!, $limit: Int!) {
+                organization(login: $owner) {
+                    projectsV2(first: $limit, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                        nodes {
+                            id
+                            number
+                            title
+                            url
+                            closed
+                            fields(first: 50) {
+                                nodes {
+                                    ... on ProjectV2FieldCommon {
+                                        id
+                                        name
+                                        dataType
+                                    }
+                                    ... on ProjectV2SingleSelectField {
+                                        options {
+                                            id
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+            data = self._graphql_request(query, {"owner": owner, "limit": limit})
+            org = data.get("organization")
+            if not org:
+                # Try as user if org lookup fails
+                return self.list_projects_with_fields(
+                    owner=owner, is_org=False, limit=limit
+                )
+            nodes = org.get("projectsV2", {}).get("nodes", [])
+        else:
+            query = """
+            query($owner: String!, $limit: Int!) {
+                user(login: $owner) {
+                    projectsV2(first: $limit, orderBy: {field: UPDATED_AT, direction: DESC}) {
+                        nodes {
+                            id
+                            number
+                            title
+                            url
+                            closed
+                            fields(first: 50) {
+                                nodes {
+                                    ... on ProjectV2FieldCommon {
+                                        id
+                                        name
+                                        dataType
+                                    }
+                                    ... on ProjectV2SingleSelectField {
+                                        options {
+                                            id
+                                            name
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            """
+            data = self._graphql_request(query, {"owner": owner, "limit": limit})
+            user = data.get("user")
+            if not user:
+                return []
+            nodes = user.get("projectsV2", {}).get("nodes", [])
+
+        projects = []
+        for node in nodes:
+            if not node:
+                continue
+
+            # Parse fields
+            fields = []
+            for field in node.get("fields", {}).get("nodes", []):
+                if not field:
+                    continue
+
+                field_data = {
+                    "id": field.get("id"),
+                    "name": field.get("name"),
+                    "data_type": field.get("dataType"),
+                }
+
+                # Add options for SingleSelect fields
+                if "options" in field:
+                    field_data["options"] = [
+                        {"id": opt["id"], "name": opt["name"]}
+                        for opt in field.get("options", [])
+                    ]
+
+                fields.append(field_data)
+
+            projects.append(
+                {
+                    "id": node["id"],
+                    "number": node["number"],
+                    "title": node["title"],
+                    "url": node["url"],
+                    "closed": node["closed"],
+                    "owner": owner,
+                    "fields": fields,
+                }
+            )
+
+        return projects
+
+    def get_project_item_id(
+        self,
+        issue_number: int,
+        project: str,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+        project_owner: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        Get the project item ID for an issue in a project.
+
+        The project item ID is required for updating field values.
+
+        Args:
+            issue_number: Issue number
+            project: Project number (as string) or title
+            owner: Repository owner (for the issue)
+            repo: Repository name
+            project_owner: Owner of the project (org or user). Defaults to repo owner.
+
+        Returns:
+            Project item ID or None if issue not in project
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+        project_owner = project_owner or owner
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        # Get project ID
+        project_id = self.get_project_id(project, owner=project_owner, is_org=True)
+        if not project_id:
+            raise GithubException(
+                404, {"message": f"Project '{project}' not found for {project_owner}"}
+            )
+
+        # Get issue node ID
+        issue_node_id = self.get_issue_node_id(issue_number, owner=owner, repo=repo)
+
+        # Search for the item in the project
+        query = """
+        query($projectId: ID!, $cursor: String) {
+            node(id: $projectId) {
+                ... on ProjectV2 {
+                    items(first: 100, after: $cursor) {
+                        nodes {
+                            id
+                            content {
+                                ... on Issue {
+                                    id
+                                    number
+                                }
+                            }
+                        }
+                        pageInfo {
+                            hasNextPage
+                            endCursor
+                        }
+                    }
+                }
+            }
+        }
+        """
+
+        cursor = None
+        while True:
+            data = self._graphql_request(
+                query, {"projectId": project_id, "cursor": cursor}
+            )
+            node = data.get("node", {})
+            items = node.get("items", {})
+
+            for item in items.get("nodes", []):
+                content = item.get("content")
+                if content and content.get("id") == issue_node_id:
+                    return item["id"]
+
+            page_info = items.get("pageInfo", {})
+            if not page_info.get("hasNextPage"):
+                break
+            cursor = page_info.get("endCursor")
+
+        return None
+
+    def update_project_item_field(
+        self,
+        issue_number: int,
+        project: str,
+        field_name: str,
+        value: str,
+        owner: Optional[str] = None,
+        repo: Optional[str] = None,
+        project_owner: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        Update a field value for an issue in a GitHub Project V2.
+
+        Supports different field types:
+        - SINGLE_SELECT: value is the option name (e.g., "In Progress")
+        - TEXT: value is the text content
+        - NUMBER: value is the number as string
+        - DATE: value is ISO date format (YYYY-MM-DD)
+
+        Args:
+            issue_number: Issue number
+            project: Project number (as string) or title
+            field_name: Field name (e.g., "Status", "Priority")
+            value: Field value (option name for SingleSelect, text for others)
+            owner: Repository owner (for the issue)
+            repo: Repository name
+            project_owner: Owner of the project (org or user). Defaults to repo owner.
+
+        Returns:
+            Dict with success status and updated info
+
+        Raises:
+            GithubException: If project, field, or option not found
+        """
+        owner = owner or self.default_owner
+        repo = repo or self.default_repo
+        project_owner = project_owner or owner
+
+        if not owner or not repo:
+            raise ValueError("Repository owner and name must be specified")
+
+        # Get project ID
+        project_id = self.get_project_id(project, owner=project_owner, is_org=True)
+        if not project_id:
+            raise GithubException(
+                404, {"message": f"Project '{project}' not found for {project_owner}"}
+            )
+
+        # Get project item ID (issue must be in project)
+        item_id = self.get_project_item_id(
+            issue_number=issue_number,
+            project=project,
+            owner=owner,
+            repo=repo,
+            project_owner=project_owner,
+        )
+        if not item_id:
+            raise GithubException(
+                404,
+                {
+                    "message": f"Issue #{issue_number} not found in project '{project}'. Add it first with add_to_project."
+                },
+            )
+
+        # Get fields to find the field ID and type
+        fields = self.get_project_fields(project, owner=project_owner, is_org=True)
+
+        # Find the field by name (case-insensitive)
+        field = None
+        for f in fields:
+            if f["name"].lower() == field_name.lower():
+                field = f
+                break
+
+        if not field:
+            available_fields = [f["name"] for f in fields]
+            raise GithubException(
+                404,
+                {
+                    "message": f"Field '{field_name}' not found in project. Available fields: {available_fields}"
+                },
+            )
+
+        field_id = field["id"]
+        data_type = field.get("data_type")
+
+        # Build the value based on field type
+        if data_type == "SINGLE_SELECT":
+            # Find the option ID by name
+            options = field.get("options", [])
+            option_id = None
+            for opt in options:
+                if opt["name"].lower() == value.lower():
+                    option_id = opt["id"]
+                    break
+
+            if not option_id:
+                available_options = [opt["name"] for opt in options]
+                raise GithubException(
+                    400,
+                    {
+                        "message": f"Option '{value}' not found for field '{field_name}'. Available options: {available_options}"
+                    },
+                )
+
+            field_value = {"singleSelectOptionId": option_id}
+
+        elif data_type == "TEXT":
+            field_value = {"text": value}
+
+        elif data_type == "NUMBER":
+            try:
+                field_value = {"number": float(value)}
+            except ValueError:
+                raise GithubException(
+                    400,
+                    {
+                        "message": f"Invalid number value '{value}' for field '{field_name}'"
+                    },
+                )
+
+        elif data_type == "DATE":
+            field_value = {"date": value}
+
+        else:
+            raise GithubException(
+                400,
+                {
+                    "message": f"Field type '{data_type}' not supported for updates. Supported: SINGLE_SELECT, TEXT, NUMBER, DATE"
+                },
+            )
+
+        # Execute the mutation
+        mutation = """
+        mutation($projectId: ID!, $itemId: ID!, $fieldId: ID!, $value: ProjectV2FieldValue!) {
+            updateProjectV2ItemFieldValue(input: {
+                projectId: $projectId,
+                itemId: $itemId,
+                fieldId: $fieldId,
+                value: $value
+            }) {
+                projectV2Item {
+                    id
+                }
+            }
+        }
+        """
+
+        data = self._graphql_request(
+            mutation,
+            {
+                "projectId": project_id,
+                "itemId": item_id,
+                "fieldId": field_id,
+                "value": field_value,
+            },
+        )
+
+        updated_item = data.get("updateProjectV2ItemFieldValue", {}).get(
+            "projectV2Item"
+        )
+
+        return {
+            "success": True,
+            "issue_number": issue_number,
+            "project": project,
+            "field": field_name,
+            "value": value,
+            "item_id": updated_item["id"] if updated_item else item_id,
+        }

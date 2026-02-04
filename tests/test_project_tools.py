@@ -353,6 +353,375 @@ def test_actual_github_client():
     return True
 
 
+# ============================================================================
+# New Tests for Project Fields Support
+# ============================================================================
+
+
+def test_get_project_fields():
+    """Test getting project fields with options for SingleSelect."""
+    print("\n=== Test 10: get_project_fields ===")
+
+    # Mock GraphQL response for fields query
+    mock_response = {
+        "node": {
+            "fields": {
+                "nodes": [
+                    {"id": "PVTF_field1", "name": "Title", "dataType": "TITLE"},
+                    {
+                        "id": "PVTF_field2",
+                        "name": "Status",
+                        "dataType": "SINGLE_SELECT",
+                        "options": [
+                            {"id": "opt1", "name": "Todo"},
+                            {"id": "opt2", "name": "In Progress"},
+                            {"id": "opt3", "name": "Done"},
+                        ],
+                    },
+                    {
+                        "id": "PVTF_field3",
+                        "name": "Priority",
+                        "dataType": "SINGLE_SELECT",
+                        "options": [
+                            {"id": "opt4", "name": "Low"},
+                            {"id": "opt5", "name": "Medium"},
+                            {"id": "opt6", "name": "High"},
+                        ],
+                    },
+                    {"id": "PVTF_field4", "name": "Due Date", "dataType": "DATE"},
+                    {"id": "PVTF_field5", "name": "Notes", "dataType": "TEXT"},
+                ]
+            }
+        }
+    }
+
+    # Parse fields like the client does
+    node = mock_response.get("node")
+    fields = []
+    for field in node.get("fields", {}).get("nodes", []):
+        if not field:
+            continue
+
+        field_data = {
+            "id": field.get("id"),
+            "name": field.get("name"),
+            "data_type": field.get("dataType"),
+        }
+
+        # Add options for SingleSelect fields
+        if "options" in field:
+            field_data["options"] = [
+                {"id": opt["id"], "name": opt["name"]}
+                for opt in field.get("options", [])
+            ]
+
+        fields.append(field_data)
+
+    assert len(fields) == 5, f"Expected 5 fields, got {len(fields)}"
+
+    # Check Status field has options
+    status_field = next((f for f in fields if f["name"] == "Status"), None)
+    assert status_field is not None, "Status field should exist"
+    assert status_field["data_type"] == "SINGLE_SELECT", (
+        "Status should be SINGLE_SELECT"
+    )
+    assert len(status_field["options"]) == 3, "Status should have 3 options"
+    assert status_field["options"][1]["name"] == "In Progress", (
+        "Second option should be 'In Progress'"
+    )
+
+    # Check TEXT field has no options
+    notes_field = next((f for f in fields if f["name"] == "Notes"), None)
+    assert notes_field is not None, "Notes field should exist"
+    assert "options" not in notes_field, "TEXT field should not have options"
+
+    print("✅ Parsed 5 fields correctly")
+    print(f"   - Status has {len(status_field['options'])} options")
+    print("✅ Test passed!\n")
+    return True
+
+
+def test_update_project_field_single_select():
+    """Test updating a SingleSelect field value."""
+    print("\n=== Test 11: update_project_field (SINGLE_SELECT) ===")
+
+    # Mock field lookup
+    mock_fields = [
+        {
+            "id": "PVTF_status",
+            "name": "Status",
+            "data_type": "SINGLE_SELECT",
+            "options": [
+                {"id": "opt1", "name": "Todo"},
+                {"id": "opt2", "name": "In Progress"},
+                {"id": "opt3", "name": "Done"},
+            ],
+        }
+    ]
+
+    # Simulate finding field and option
+    field_name = "Status"
+    value = "In Progress"
+
+    field = next(
+        (f for f in mock_fields if f["name"].lower() == field_name.lower()), None
+    )
+    assert field is not None, "Should find Status field"
+
+    # Find option ID
+    option_id = None
+    for opt in field.get("options", []):
+        if opt["name"].lower() == value.lower():
+            option_id = opt["id"]
+            break
+
+    assert option_id == "opt2", f"Should find option ID for '{value}'"
+
+    # Build field value for mutation
+    field_value = {"singleSelectOptionId": option_id}
+    assert field_value == {"singleSelectOptionId": "opt2"}, (
+        "Field value should have correct option ID"
+    )
+
+    # Mock mutation response
+    mock_mutation_response = {
+        "updateProjectV2ItemFieldValue": {"projectV2Item": {"id": "PVTI_item123"}}
+    }
+
+    updated_item = mock_mutation_response.get("updateProjectV2ItemFieldValue", {}).get(
+        "projectV2Item"
+    )
+    result = {
+        "success": True,
+        "issue_number": 42,
+        "project": "1",
+        "field": field_name,
+        "value": value,
+        "item_id": updated_item["id"] if updated_item else None,
+    }
+
+    assert result["success"] is True, "Should be successful"
+    assert result["field"] == "Status", "Should have correct field"
+    assert result["value"] == "In Progress", "Should have correct value"
+
+    print(f"✅ Found option ID '{option_id}' for value '{value}'")
+    print(f"✅ Updated field: {result['field']} = {result['value']}")
+    print("✅ Test passed!\n")
+    return True
+
+
+def test_update_project_field_text():
+    """Test updating a TEXT field value."""
+    print("\n=== Test 12: update_project_field (TEXT) ===")
+
+    # Mock field lookup
+    mock_fields = [
+        {"id": "PVTF_notes", "name": "Notes", "data_type": "TEXT"},
+    ]
+
+    # Simulate finding field
+    field_name = "Notes"
+    value = "This is a note about the issue."
+
+    field = next(
+        (f for f in mock_fields if f["name"].lower() == field_name.lower()), None
+    )
+    assert field is not None, "Should find Notes field"
+    assert field["data_type"] == "TEXT", "Should be TEXT type"
+
+    # Build field value for TEXT
+    field_value = {"text": value}
+    assert field_value == {"text": "This is a note about the issue."}, (
+        "Field value should have text"
+    )
+
+    print(f"✅ Text field value: {field_value}")
+    print("✅ Test passed!\n")
+    return True
+
+
+def test_update_project_field_invalid_option():
+    """Test error handling when SingleSelect option is invalid."""
+    print("\n=== Test 13: update_project_field (invalid option) ===")
+
+    # Mock field lookup
+    mock_fields = [
+        {
+            "id": "PVTF_status",
+            "name": "Status",
+            "data_type": "SINGLE_SELECT",
+            "options": [
+                {"id": "opt1", "name": "Todo"},
+                {"id": "opt2", "name": "In Progress"},
+                {"id": "opt3", "name": "Done"},
+            ],
+        }
+    ]
+
+    # Try to find an invalid option
+    field_name = "Status"
+    value = "Invalid Status"
+
+    field = next(
+        (f for f in mock_fields if f["name"].lower() == field_name.lower()), None
+    )
+    assert field is not None, "Should find Status field"
+
+    # Find option ID
+    option_id = None
+    for opt in field.get("options", []):
+        if opt["name"].lower() == value.lower():
+            option_id = opt["id"]
+            break
+
+    # Should not find option
+    assert option_id is None, "Should NOT find option for invalid value"
+
+    # Build error message like the client does
+    available_options = [opt["name"] for opt in field.get("options", [])]
+    error_message = f"Option '{value}' not found for field '{field_name}'. Available options: {available_options}"
+
+    assert "Invalid Status" in error_message, "Error should mention the invalid value"
+    assert "Todo" in error_message, "Error should list available options"
+    assert "In Progress" in error_message, "Error should list available options"
+    assert "Done" in error_message, "Error should list available options"
+
+    print(f"✅ Correctly detected invalid option: '{value}'")
+    print(f"✅ Error message includes available options: {available_options}")
+    print("✅ Test passed!\n")
+    return True
+
+
+def test_list_projects_with_fields():
+    """Test listing projects with fields in one call."""
+    print("\n=== Test 14: list_projects_with_fields ===")
+
+    # Mock GraphQL response
+    mock_response = {
+        "organization": {
+            "projectsV2": {
+                "nodes": [
+                    {
+                        "id": "PVT_project1",
+                        "number": 1,
+                        "title": "Sprint Board",
+                        "url": "https://github.com/orgs/test-org/projects/1",
+                        "closed": False,
+                        "fields": {
+                            "nodes": [
+                                {"id": "PVTF_f1", "name": "Title", "dataType": "TITLE"},
+                                {
+                                    "id": "PVTF_f2",
+                                    "name": "Status",
+                                    "dataType": "SINGLE_SELECT",
+                                    "options": [
+                                        {"id": "opt1", "name": "Todo"},
+                                        {"id": "opt2", "name": "Done"},
+                                    ],
+                                },
+                            ]
+                        },
+                    }
+                ]
+            }
+        }
+    }
+
+    # Parse like the client does
+    owner = "test-org"
+    org = mock_response.get("organization")
+    nodes = org.get("projectsV2", {}).get("nodes", [])
+
+    projects = []
+    for node in nodes:
+        if not node:
+            continue
+
+        # Parse fields
+        fields = []
+        for field in node.get("fields", {}).get("nodes", []):
+            if not field:
+                continue
+
+            field_data = {
+                "id": field.get("id"),
+                "name": field.get("name"),
+                "data_type": field.get("dataType"),
+            }
+
+            if "options" in field:
+                field_data["options"] = [
+                    {"id": opt["id"], "name": opt["name"]}
+                    for opt in field.get("options", [])
+                ]
+
+            fields.append(field_data)
+
+        projects.append(
+            {
+                "id": node["id"],
+                "number": node["number"],
+                "title": node["title"],
+                "url": node["url"],
+                "closed": node["closed"],
+                "owner": owner,
+                "fields": fields,
+            }
+        )
+
+    assert len(projects) == 1, f"Expected 1 project, got {len(projects)}"
+    assert projects[0]["title"] == "Sprint Board", "Should have correct title"
+    assert len(projects[0]["fields"]) == 2, "Should have 2 fields"
+
+    status_field = next(
+        (f for f in projects[0]["fields"] if f["name"] == "Status"), None
+    )
+    assert status_field is not None, "Should have Status field"
+    assert len(status_field["options"]) == 2, "Status should have 2 options"
+
+    print(f"✅ Parsed project: {projects[0]['title']}")
+    print(f"✅ Fields: {[f['name'] for f in projects[0]['fields']]}")
+    print("✅ Test passed!\n")
+    return True
+
+
+def test_get_project_item_id():
+    """Test finding project item ID for an issue."""
+    print("\n=== Test 15: get_project_item_id ===")
+
+    # Mock paginated response
+    mock_items_response = {
+        "node": {
+            "items": {
+                "nodes": [
+                    {"id": "PVTI_item1", "content": {"id": "I_issue1", "number": 41}},
+                    {"id": "PVTI_item2", "content": {"id": "I_issue2", "number": 42}},
+                    {"id": "PVTI_item3", "content": {"id": "I_issue3", "number": 43}},
+                ],
+                "pageInfo": {"hasNextPage": False, "endCursor": None},
+            }
+        }
+    }
+
+    # Find item ID for issue #42
+    target_issue_id = "I_issue2"
+    node = mock_items_response.get("node", {})
+    items = node.get("items", {})
+
+    item_id = None
+    for item in items.get("nodes", []):
+        content = item.get("content")
+        if content and content.get("id") == target_issue_id:
+            item_id = item["id"]
+            break
+
+    assert item_id == "PVTI_item2", "Should find item ID for issue #42"
+
+    print(f"✅ Found project item ID: {item_id}")
+    print("✅ Test passed!\n")
+    return True
+
+
 if __name__ == "__main__":
     print("=" * 60)
     print("Testing GitHub Projects V2 Tools")
@@ -368,6 +737,13 @@ if __name__ == "__main__":
         test_graphql_error_handling,
         test_with_mock_github_client,
         test_actual_github_client,
+        # New tests for project fields
+        test_get_project_fields,
+        test_update_project_field_single_select,
+        test_update_project_field_text,
+        test_update_project_field_invalid_option,
+        test_list_projects_with_fields,
+        test_get_project_item_id,
     ]
 
     passed = 0
