@@ -539,11 +539,14 @@ class GitHubClient:
 
         # Merge the PR
         try:
-            result = pr.merge(
-                commit_title=commit_title,
-                commit_message=commit_message,
-                merge_method=merge_method,
-            )
+            # Only pass optional params if provided (PyGithub expects NotSet, not None)
+            merge_kwargs = {"merge_method": merge_method}
+            if commit_title is not None:
+                merge_kwargs["commit_title"] = commit_title
+            if commit_message is not None:
+                merge_kwargs["commit_message"] = commit_message
+
+            result = pr.merge(**merge_kwargs)
 
             return {
                 "merged": result.merged,
