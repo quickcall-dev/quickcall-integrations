@@ -529,25 +529,35 @@ class GitHubClient:
                 "sha": pr.merge_commit_sha,
             }
 
-        if not pr.mergeable:
+        # pr.mergeable can be None (not computed yet), False, or True
+        if pr.mergeable is False:
             return {
                 "merged": False,
-                "message": "PR is not mergeable (conflicts or checks failing)",
+                "message": f"PR is not mergeable. State: {pr.mergeable_state}",
                 "sha": None,
             }
 
         # Merge the PR
-        result = pr.merge(
-            commit_title=commit_title,
-            commit_message=commit_message,
-            merge_method=merge_method,
-        )
+        try:
+            result = pr.merge(
+                commit_title=commit_title,
+                commit_message=commit_message,
+                merge_method=merge_method,
+            )
 
-        return {
-            "merged": result.merged,
-            "message": result.message,
-            "sha": result.sha,
-        }
+            return {
+                "merged": result.merged,
+                "message": result.message,
+                "sha": result.sha,
+            }
+        except GithubException as e:
+            # Extract detailed error from GitHub API response
+            error_msg = e.data.get("message", str(e)) if e.data else str(e)
+            return {
+                "merged": False,
+                "message": f"GitHub API error ({e.status}): {error_msg}",
+                "sha": None,
+            }
 
     def close_pr(
         self,
