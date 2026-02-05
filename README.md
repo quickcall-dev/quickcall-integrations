@@ -376,6 +376,46 @@ Add labels bug and urgent to PR #42
 
 When creating a PR, it automatically assigns to the current user unless `assignees` is explicitly provided.
 
+## Project Management
+
+The `manage_projects` tool provides GitHub Projects V2 integration:
+
+### Actions
+
+| Action | Description |
+|--------|-------------|
+| `list` | List projects for an owner (user or org) |
+| `add` | Add issue(s) to a project (optionally set fields in same call) |
+| `remove` | Remove issue(s) from a project |
+| `update_fields` | Update project fields for issue(s) |
+
+### Parameters
+
+| Parameter | Description |
+|-----------|-------------|
+| `project` | Project number or title |
+| `project_owner` | Owner of the project (defaults to repo owner) |
+| `issue_numbers` | Issue number(s) for add/remove/update_fields |
+| `fields` | Dict of field names to values (e.g., `{'Status': 'In Progress'}`) |
+
+### Examples
+
+```
+List projects for quickcall-dev org
+Add issue #42 to project "Sprint Board" with Status "Todo"
+Update issue #42 in project 1 to Status "In Progress" and Priority "High"
+Remove issue #42 from project 1
+```
+
+### One-Step Add + Set Fields
+
+Use `add` with `fields` to add an issue and set fields in a single call:
+
+```python
+manage_projects(action='add', issue_numbers=[42], project='1',
+                fields={'Status': 'Todo', 'Priority': 'High'}, repo='my-repo')
+```
+
 ## Troubleshooting
 
 ### Clean Reinstall
