@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
 import yaml
+from github import GithubException
 from fastmcp import FastMCP
 from fastmcp.exceptions import ToolError
 from pydantic import Field
@@ -1329,8 +1330,11 @@ def create_github_tools(mcp: FastMCP) -> None:
             raise
         except ValueError as e:
             raise ToolError(f"Repository not specified: {str(e)}")
+        except GithubException as e:
+            error_msg = e.data.get("message", str(e)) if e.data else str(e)
+            raise ToolError(f"GitHub API error ({e.status}): {error_msg}")
         except Exception as e:
-            raise ToolError(f"Failed to {action} PR(s): {str(e)}")
+            raise ToolError(f"Failed to {action} PR(s): {type(e).__name__}: {str(e) or repr(e)}")
 
     @mcp.tool(tags={"github", "prs", "appraisal"})
     def prepare_appraisal_data(
